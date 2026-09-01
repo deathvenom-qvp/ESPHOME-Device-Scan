@@ -26,9 +26,17 @@ config on first start. The base config it generates from is the one already in
 - Example parents moved to `examples/parents/` as documentation and test
   fixtures only. They are never installed.
 
-**Migrating from 1.0.0:** remove the `templates_dir` option if you set it, and
-make sure your base configs are in the ESPHome directory. Anything you had in a
-separate templates folder should be moved there.
+**Migrating from 1.0.0.** The update is automatic — the add-on clears the
+now-unused `templates_dir` option from your saved settings on first start, so
+there is nothing to edit. Two things to do by hand:
+
+1. Move your base configs into `/homeassistant/esphome/` (i.e. alongside your
+   device configs) if they are not already there. 1.0.0 seeded its examples into
+   `/addon_configs/<slug>_esphome_device_scan/templates/`; that folder is no
+   longer mapped, and anything of your own in it should be moved across.
+2. Check the panel's **Parent templates** section after starting. It lists every
+   parent found and why. If your base config is not listed, it has no MAC-suffix
+   logic — add `# x-template: true` to its header.
 
 ## 1.0.0
 

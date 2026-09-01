@@ -6,6 +6,28 @@
 # source of configuration whether it runs under Supervisor or standalone.
 set -euo pipefail
 
+# Options this add-on used to have. Supervisor keeps whatever a user saved
+# under an older version, and warns about keys the current schema no longer
+# knows, so clear them out rather than leaving a warning on every start.
+# `bashio::addon.option <key>` with no value argument deletes the key.
+readonly REMOVED_OPTIONS=(
+    "templates_dir"   # 1.1.0: parents are read from the ESPHome directory
+)
+
+remove_stale_options() {
+    local options key
+    options="$(bashio::addon.options)"
+    for key in "${REMOVED_OPTIONS[@]}"; do
+        if bashio::jq.exists "${options}" ".${key}"; then
+            bashio::log.info "Removing option '${key}'; it is no longer used."
+            bashio::addon.option "${key}"
+        fi
+    done
+}
+
+bashio::log.info "Starting ESPHome Device Scan..."
+remove_stale_options
+
 export EDSCAN_ESPHOME_CONFIG_DIR
 export EDSCAN_SCAN_INTERVAL_MINUTES
 export EDSCAN_AUTO_GENERATE
@@ -24,7 +46,6 @@ EDSCAN_NAME_ADD_MAC_SUFFIX_ACTION="$(bashio::config 'name_add_mac_suffix_action'
 EDSCAN_DRY_RUN="$(bashio::config 'dry_run')"
 EDSCAN_LOG_LEVEL="$(bashio::config 'log_level')"
 
-bashio::log.info "Starting ESPHome Device Scan..."
 bashio::log.info "ESPHome config dir: ${EDSCAN_ESPHOME_CONFIG_DIR}"
 bashio::log.info "Parent templates are read from that directory."
 
