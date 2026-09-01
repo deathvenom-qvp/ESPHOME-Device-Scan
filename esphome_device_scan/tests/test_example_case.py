@@ -14,11 +14,17 @@ than passing silently.
 
 from __future__ import annotations
 
+import re
 from dataclasses import replace
 from pathlib import Path
 
 import pytest
-from conftest import FakeHaApi, make_entry, make_registry_device
+from conftest import (
+    FakeHaApi,
+    generated_configs,
+    make_entry,
+    make_registry_device,
+)
 
 from app.config_store import EsphomeConfigStore
 from app.discovery import DeviceDiscoveryService
@@ -38,7 +44,7 @@ def build(settings, ha: FakeHaApi) -> ScanOrchestrator:
     return ScanOrchestrator(
         discovery=DeviceDiscoveryService(ha),
         store=EsphomeConfigStore(settings.esphome_config_dir),
-        templates=TemplateRepository(settings.templates_dir),
+        templates=TemplateRepository(settings.esphome_config_dir),
         generator=YamlGenerator(
             settings.mac_policy, settings.name_add_mac_suffix_action
         ),
@@ -60,7 +66,7 @@ def spec_example_ha() -> FakeHaApi:
 # -- the specified case -----------------------------------------------------
 
 
-async def test_spec_example_end_to_end(settings, esphome_dir) -> None:
+async def test_spec_example_end_to_end(settings, esphome_dir, parents_installed) -> None:
     orchestrator = build(settings, spec_example_ha())
     report = await orchestrator.scan()
 
@@ -72,7 +78,19 @@ async def test_spec_example_end_to_end(settings, esphome_dir) -> None:
     content = written.read_text()
     assert "name: cloudbay-t-livingroom" in content
     assert "name_add_mac_suffix: false" in content
-    assert "cloudbay-t-${mac}" not in content
+
+    # The MAC-suffix logic is gone in the sense that matters: nothing is left
+    # dangling. `substitutions.mac` now holds this device's real MAC, and every
+    # remaining ${...} reference resolves through the file's own substitutions.
+    # (References are left in place on purpose -- patching the definition is a
+    # one-line diff where inlining would touch every use site.)
+    data = load(content)
+    declared = set(data.get("substitutions", {}))
+    assert data["substitutions"]["mac"] == "ddeeff"
+
+    code = [ln for ln in content.splitlines() if not ln.lstrip().startswith("#")]
+    referenced = {m for ln in code for m in re.findall(r"\$\{(\w+)\}", ln)}
+    assert referenced <= declared, f"unresolvable placeholders: {referenced - declared}"
 
     # Everything else from the template is still there.
     assert "board: esp32dev" in content
@@ -81,7 +99,7 @@ async def test_spec_example_end_to_end(settings, esphome_dir) -> None:
     assert "platform: uptime" in content
 
 
-async def test_generated_file_matches_the_committed_example(settings) -> None:
+async def test_generated_file_matches_the_committed_example(settings, parents_installed) -> None:
     """Golden-file check, so behaviour changes surface as a reviewable diff."""
     orchestrator = build(settings, spec_example_ha())
     await orchestrator.scan()
@@ -93,7 +111,7 @@ async def test_generated_file_matches_the_committed_example(settings) -> None:
     )
 
 
-async def test_generated_output_is_loadable_yaml(settings) -> None:
+async def test_generated_output_is_loadable_yaml(settings, parents_installed) -> None:
     orchestrator = build(settings, spec_example_ha())
     await orchestrator.scan()
 
@@ -107,7 +125,7 @@ async def test_generated_output_is_loadable_yaml(settings) -> None:
 # -- scan policy ------------------------------------------------------------
 
 
-async def test_a_device_with_a_config_is_skipped(settings, esphome_dir) -> None:
+async def test_a_device_with_a_config_is_skipped(settings, esphome_dir, parents_installed) -> None:
     (esphome_dir / "existing.yaml").write_text(
         "esphome:\n  name: cloudbay-t-livingroom\n# hand written\n"
     )
@@ -119,7 +137,7 @@ async def test_a_device_with_a_config_is_skipped(settings, esphome_dir) -> None:
     assert "# hand written" in (esphome_dir / "existing.yaml").read_text()
 
 
-async def test_a_scan_never_overwrites(settings, esphome_dir) -> None:
+async def test_a_scan_never_overwrites(settings, esphome_dir, parents_installed) -> None:
     """The central safety guarantee: automation only ever creates."""
     orchestrator = build(settings, spec_example_ha())
     await orchestrator.scan()
@@ -132,7 +150,7 @@ async def test_a_scan_never_overwrites(settings, esphome_dir) -> None:
     assert target.read_text().startswith("# user edited this")
 
 
-async def test_scanning_is_idempotent(settings, esphome_dir) -> None:
+async def test_scanning_is_idempotent(settings, esphome_dir, parents_installed) -> None:
     orchestrator = build(settings, spec_example_ha())
     await orchestrator.scan()
 
@@ -150,7 +168,7 @@ async def test_scanning_is_idempotent(settings, esphome_dir) -> None:
     assert second.count(Outcome.SKIPPED_HAS_CONFIG) == 1
 
 
-async def test_unmatched_devices_are_reported_not_generated(settings, esphome_dir) -> None:
+async def test_unmatched_devices_are_reported_not_generated(settings, esphome_dir, parents_installed) -> None:
     ha = FakeHaApi(
         config_entries=[make_entry(title="mystery-gadget")],
         devices=[make_registry_device(name="Mystery Gadget")],
@@ -158,30 +176,30 @@ async def test_unmatched_devices_are_reported_not_generated(settings, esphome_di
     report = await build(settings, ha).scan()
 
     assert report.count(Outcome.NO_TEMPLATE_MATCH) == 1
-    assert list(esphome_dir.iterdir()) == []
-    assert "No template matches" in report.devices[0].message
+    assert generated_configs(esphome_dir) == []
+    assert "No parent template matches" in report.devices[0].message
 
 
-async def test_dry_run_writes_nothing(settings, esphome_dir) -> None:
+async def test_dry_run_writes_nothing(settings, esphome_dir, parents_installed) -> None:
     orchestrator = build(replace(settings, dry_run=True), spec_example_ha())
     report = await orchestrator.scan()
 
     assert report.count(Outcome.WOULD_GENERATE) == 1
-    assert list(esphome_dir.iterdir()) == []
+    assert generated_configs(esphome_dir) == []
 
 
-async def test_auto_generate_off_writes_nothing(settings, esphome_dir) -> None:
+async def test_auto_generate_off_writes_nothing(settings, esphome_dir, parents_installed) -> None:
     orchestrator = build(replace(settings, auto_generate=False), spec_example_ha())
     report = await orchestrator.scan()
 
     assert report.count(Outcome.SKIPPED_AUTO_GENERATE_OFF) == 1
-    assert list(esphome_dir.iterdir()) == []
+    assert generated_configs(esphome_dir) == []
 
 
 # -- regeneration -----------------------------------------------------------
 
 
-async def test_regenerate_overwrites_and_backs_up(settings, esphome_dir) -> None:
+async def test_regenerate_overwrites_and_backs_up(settings, esphome_dir, parents_installed) -> None:
     orchestrator = build(settings, spec_example_ha())
     await orchestrator.scan()
 
@@ -198,13 +216,13 @@ async def test_regenerate_overwrites_and_backs_up(settings, esphome_dir) -> None
     assert backups[0].read_text() == "# stale hand edit\n"
 
 
-async def test_regenerate_of_an_unknown_device_raises(settings) -> None:
+async def test_regenerate_of_an_unknown_device_raises(settings, parents_installed) -> None:
     orchestrator = build(settings, spec_example_ha())
     with pytest.raises(LookupError):
         await orchestrator.regenerate("not-a-device")
 
 
-async def test_on_demand_generate_respects_the_overwrite_guard(settings, esphome_dir) -> None:
+async def test_on_demand_generate_respects_the_overwrite_guard(settings, esphome_dir, parents_installed) -> None:
     orchestrator = build(settings, spec_example_ha())
     await orchestrator.scan()
 
@@ -216,21 +234,22 @@ async def test_on_demand_generate_respects_the_overwrite_guard(settings, esphome
 # -- resilience -------------------------------------------------------------
 
 
-async def test_a_scan_survives_an_unreadable_template_dir(settings, esphome_dir) -> None:
-    orchestrator = build(replace(settings, templates_dir=Path("/nonexistent")), spec_example_ha())
-    report = await orchestrator.scan()
+async def test_a_scan_survives_a_missing_esphome_dir(settings, tmp_path) -> None:
+    """No directory means no parents and nowhere to write -- report, do not crash."""
+    missing = tmp_path / "not-created"
+    report = await build(replace(settings, esphome_config_dir=missing), spec_example_ha()).scan()
 
     assert report.count(Outcome.NO_TEMPLATE_MATCH) == 1
-    assert list(esphome_dir.iterdir()) == []
+    assert not missing.exists()
 
 
-async def test_a_scan_with_no_devices_reports_cleanly(settings) -> None:
+async def test_a_scan_with_no_devices_reports_cleanly(settings, parents_installed) -> None:
     report = await build(settings, FakeHaApi()).scan()
     assert report.devices == ()
     assert "0 device(s)" in report.summary
 
 
-async def test_two_devices_get_two_files(settings, esphome_dir) -> None:
+async def test_two_devices_get_two_files(settings, esphome_dir, parents_installed) -> None:
     ha = FakeHaApi(
         config_entries=[
             make_entry("e1", "cloudbay-t-livingroom"),

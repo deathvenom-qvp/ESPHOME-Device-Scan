@@ -3,13 +3,9 @@ configuration:
   esphome_config_dir:
     name: ESPHome config directory
     description: >-
-      Where the ESPHome add-on keeps its YAML files. Default
-      /homeassistant/esphome, which is <your HA config>/esphome.
-  templates_dir:
-    name: Templates directory
-    description: >-
-      Where your base YAML templates live. Two examples are copied here on
-      first start. Editable via the File Editor or Samba add-ons.
+      Where the ESPHome add-on keeps its YAML files, and where parent
+      templates are read from. Default /homeassistant/esphome, which is
+      <your HA config>/esphome. Nothing is ever copied into it.
   scan_interval_minutes:
     name: Scan interval (minutes)
     description: How often to look for devices without a config.

@@ -65,7 +65,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="never write files, just report what would be generated",
     )
     parser.add_argument("--esphome-dir", help="override the ESPHome config directory")
-    parser.add_argument("--templates-dir", help="override the templates directory")
     return parser.parse_args(argv)
 
 
@@ -76,8 +75,6 @@ def build_settings(args: argparse.Namespace) -> Settings:
         overrides["dry_run"] = True
     if args.esphome_dir:
         overrides["esphome_config_dir"] = Path(args.esphome_dir)
-    if args.templates_dir:
-        overrides["templates_dir"] = Path(args.templates_dir)
     return replace(settings, **overrides) if overrides else settings
 
 
@@ -88,16 +85,16 @@ async def run(args: argparse.Namespace) -> int:
 
     _LOGGER.info("ESPHome Device Scan starting")
     _LOGGER.info("ESPHome config dir: %s", settings.esphome_config_dir)
-    _LOGGER.info("Templates dir:      %s", settings.templates_dir)
+    _LOGGER.info(
+        "Parent templates are read from that same directory; nothing is copied in."
+    )
     if settings.dry_run:
         _LOGGER.warning("Dry run is on: no files will be written.")
     if not settings.auto_generate:
         _LOGGER.info("auto_generate is off: use the panel to generate on demand.")
 
-    templates = TemplateRepository(settings.templates_dir, settings.seed_templates_dir)
-    templates.ensure_seeded()
-
     store = EsphomeConfigStore(settings.esphome_config_dir)
+    templates = TemplateRepository(settings.esphome_config_dir)
     generator = YamlGenerator(
         settings.mac_policy, settings.name_add_mac_suffix_action
     )

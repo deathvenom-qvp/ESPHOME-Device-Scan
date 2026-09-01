@@ -20,6 +20,7 @@
     banner: document.getElementById("banner"),
     body: document.getElementById("devices-body"),
     templates: document.getElementById("templates"),
+    templatesDir: document.getElementById("templates-dir"),
     logs: document.getElementById("logs"),
     settings: document.getElementById("settings"),
     scanBtn: document.getElementById("scan-btn"),
@@ -70,6 +71,13 @@
     offline: "pill-idle",
     discovered: "pill-warn",
     unknown: "pill-idle",
+  };
+
+  // Why a file in the ESPHome directory was taken to be a parent template.
+  var DETECTED_BY = {
+    "mac-placeholder": "found via ${mac} in its name",
+    "mac-suffix-flag": "found via name_add_mac_suffix",
+    "directive": "marked # x-template",
   };
 
   var OUTCOME_LABEL = {
@@ -165,7 +173,9 @@
     el.templates.textContent = "";
     if (!state.templates.length) {
       el.templates.appendChild(node("p", "empty",
-        "No templates found. Add a .yaml file to " + (state.settings.templates_dir || "the templates directory") + "."));
+        "No parent templates found. A parent is a base config in your ESPHome "
+        + "directory with MAC-suffix logic \u2014 name: <family>-${mac}, or "
+        + "name_add_mac_suffix: true \u2014 or any file marked '# x-template: true'."));
       return;
     }
 
@@ -176,10 +186,11 @@
       var rules = [];
       if (template.regexes.length) rules.push("regex " + template.regexes.join(", "));
       if (template.prefixes.length) {
-        rules.push((template.implicit ? "prefix (from filename) " : "prefix ") + template.prefixes.join(", "));
+        rules.push("claims " + template.prefixes.join("-*, ") + "-*");
       }
       if (template.models.length) rules.push("model " + template.models.join(", "));
       if (template.mac_policy) rules.push("mac: " + template.mac_policy);
+      if (template.detected_by) rules.push(DETECTED_BY[template.detected_by] || template.detected_by);
 
       row.appendChild(node("span", "template-rules", rules.join(" · ")));
       el.templates.appendChild(row);
@@ -195,7 +206,6 @@
   function renderSettings() {
     var labels = {
       esphome_config_dir: "ESPHome config dir",
-      templates_dir: "Templates dir",
       scan_interval_minutes: "Scan interval (min)",
       auto_generate: "Auto-generate",
       dry_run: "Dry run",
@@ -249,6 +259,9 @@
       applyScan(data.scan || {});
       renderTemplates();
       renderSettings();
+      el.templatesDir.textContent = state.settings.esphome_config_dir
+        ? "read from " + state.settings.esphome_config_dir
+        : "";
     }).catch(function (err) {
       banner("Could not load state: " + err.message);
     });

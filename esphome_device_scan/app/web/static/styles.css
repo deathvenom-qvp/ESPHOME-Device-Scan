@@ -114,6 +114,13 @@ main {
 
 .panel-head h2 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: .01em; }
 
+.panel-note {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-family: var(--mono);
+  word-break: break-all;
+}
+
 .filter {
   display: flex;
   align-items: center;

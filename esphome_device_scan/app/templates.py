@@ -1,113 +1,128 @@
-"""Base template loading and device-to-template matching.
+"""Finding parent templates, and matching devices to them.
 
-Matching directives live in ``# x-...:`` comments in the template's header
-rather than in a YAML key, so a template stays a byte-for-byte valid ESPHome
-config that ``esphome config`` can validate and a human can flash directly:
+Parents are discovered in the ESPHome config directory itself -- the base
+firmware files you already flashed the batch from. Nothing is shipped with the
+add-on and nothing is copied into your config. See :mod:`app.parents` for how a
+parent is told apart from the per-device files sharing that directory.
 
-    # x-match-prefix: cloudbay-t
+A parent claims devices in this order, most specific first:
+
     # x-match-regex:  ^cb-t-\\d+$
+    # x-match-prefix: cloudbay-t, cb-t
     # x-match-model:  CloudBay T
-    # x-mac-policy:   suffix3
-    # x-priority:     10
 
-With no directives at all, the filename stem acts as the prefix -- so dropping
-in ``cloudbay-t.yaml`` is enough to claim every ``cloudbay-t-*`` device.
+With no directives at all it still works, because a base config already says
+which family it belongs to: ``name: cloudbay-t-${mac}`` implies the prefix
+``cloudbay-t``. The filename stem is the last fallback.
+
+Other directives:
+
+    # x-template:   true | false   -- force or forbid parent classification
+    # x-mac-policy: suffix3 | full | strip
+    # x-priority:   10
 """
 
 from __future__ import annotations
 
 import logging
 import re
-import shutil
 from pathlib import Path
 
 from .models import Device, MacPolicy, TemplateMatch, TemplateSpec
+from .parents import classify
 
 _LOGGER = logging.getLogger(__name__)
 
-#: `# x-key: value`, case-insensitive, tolerant of spacing.
-_DIRECTIVE_RE = re.compile(r"^\s*#\s*x-([a-z-]+)\s*:\s*(.+?)\s*$", re.IGNORECASE)
-
-#: Directives are only read from the header block: the run of comments and
-#: blank lines before the first real YAML key. This keeps an `# x-...` string
-#: deep inside a config from silently changing matching behaviour.
-_HEADER_LIMIT = 60
-
 TEMPLATE_SUFFIXES = (".yaml", ".yml")
+
+#: Never candidates, whatever they contain.
+IGNORED_NAMES = frozenset({"secrets.yaml", "secrets.yml"})
 
 # Rule precedence, most specific first. Baked into the match score so ordering
 # is total and stable rather than dependent on directory iteration order.
-_RULE_RANK = {"regex": 400, "prefix": 300, "filename-prefix": 200, "model": 100}
+_RULE_RANK = {
+    "regex": 400,
+    "prefix": 300,
+    "name-prefix": 250,
+    "filename-prefix": 200,
+    "model": 100,
+}
 
 
 class TemplateRepository:
-    """Loads templates from a directory, newest content on every scan."""
+    """Finds parent templates in the ESPHome config directory."""
 
-    def __init__(self, templates_dir: Path, seed_dir: Path | None = None) -> None:
-        self._dir = templates_dir
-        self._seed_dir = seed_dir
+    def __init__(self, esphome_dir: Path) -> None:
+        self._dir = esphome_dir
 
     @property
     def directory(self) -> Path:
         return self._dir
 
-    def ensure_seeded(self) -> int:
-        """Copy bundled examples in when the templates dir is new or empty.
-
-        Returns the number of files copied. Never overwrites: a user's own
-        template of the same name always wins.
-        """
-        if not self._seed_dir or not self._seed_dir.is_dir():
-            return 0
-        try:
-            self._dir.mkdir(parents=True, exist_ok=True)
-        except OSError as err:
-            _LOGGER.error("Cannot create templates dir %s: %s", self._dir, err)
-            return 0
-
-        if any(self._dir.glob("*.yaml")) or any(self._dir.glob("*.yml")):
-            return 0
-
-        copied = 0
-        for src in sorted(self._seed_dir.iterdir()):
-            if src.suffix.lower() not in TEMPLATE_SUFFIXES:
-                continue
-            dest = self._dir / src.name
-            if dest.exists():
-                continue
-            try:
-                shutil.copyfile(src, dest)
-                copied += 1
-            except OSError as err:
-                _LOGGER.error("Could not seed template %s: %s", src.name, err)
-        if copied:
-            _LOGGER.info("Seeded %d example template(s) into %s", copied, self._dir)
-        return copied
-
     def load_all(self) -> list[TemplateSpec]:
-        """Read every template in the directory. Unreadable files are skipped."""
+        """Every parent in the directory. Unreadable files are skipped.
+
+        Re-read on each scan, so adding a parent to the ESPHome dashboard takes
+        effect without restarting the add-on.
+        """
         if not self._dir.is_dir():
-            _LOGGER.warning("Templates directory %s does not exist", self._dir)
+            _LOGGER.warning(
+                "ESPHome config directory %s does not exist; no parent templates "
+                "can be found.",
+                self._dir,
+            )
             return []
 
         specs: list[TemplateSpec] = []
+        scanned = 0
         for path in sorted(self._dir.iterdir()):
-            if not path.is_file() or path.suffix.lower() not in TEMPLATE_SUFFIXES:
+            if not self._is_candidate(path):
                 continue
+            scanned += 1
             try:
                 raw = path.read_text(encoding="utf-8")
             except (OSError, UnicodeDecodeError) as err:
-                _LOGGER.error("Skipping template %s: %s", path.name, err)
+                _LOGGER.error("Skipping %s: %s", path.name, err)
                 continue
-            specs.append(parse_template(path, raw))
+
+            verdict = classify(raw, path)
+            if not verdict.is_parent:
+                continue
+            _LOGGER.debug(
+                "Using %s as a parent template (%s)", path.name, verdict.reason
+            )
+            specs.append(parse_template(path, raw, verdict.name_prefix))
 
         if not specs:
-            _LOGGER.warning("No templates found in %s", self._dir)
+            _LOGGER.warning(
+                "No parent templates found among %d config(s) in %s. A parent is "
+                "a base config with MAC-suffix logic -- 'name: <family>-${mac}' or "
+                "'name_add_mac_suffix: true' -- or any file marked "
+                "'# x-template: true'.",
+                scanned,
+                self._dir,
+            )
         return specs
 
+    @staticmethod
+    def _is_candidate(path: Path) -> bool:
+        return (
+            path.is_file()
+            and path.suffix.lower() in TEMPLATE_SUFFIXES
+            and path.name not in IGNORED_NAMES
+            and not path.name.startswith(".")
+        )
 
-def parse_template(path: Path, raw: str) -> TemplateSpec:
+
+def parse_template(
+    path: Path, raw: str, name_prefix: str | None = None
+) -> TemplateSpec:
     """Build a TemplateSpec, reading `# x-...` directives from the header."""
+    verdict = classify(raw, path)
+    directives = verdict.directives
+    if name_prefix is None:
+        name_prefix = verdict.name_prefix
+
     prefixes: list[str] = []
     regexes: list[str] = []
     models: list[str] = []
@@ -115,18 +130,7 @@ def parse_template(path: Path, raw: str) -> TemplateSpec:
     mac_policy: MacPolicy | None = None
     warnings: list[str] = []
 
-    for line in raw.splitlines()[:_HEADER_LIMIT]:
-        stripped = line.strip()
-        if not stripped:
-            continue
-        if not stripped.startswith("#"):
-            break  # first real YAML content ends the header block
-
-        match = _DIRECTIVE_RE.match(line)
-        if not match:
-            continue
-        key, value = match.group(1).lower(), match.group(2).strip()
-
+    for key, value in directives.items():
         if key in ("match-prefix", "match-prefixes"):
             prefixes.extend(_split_list(value))
         elif key in ("match-regex", "match-regexes"):
@@ -162,6 +166,8 @@ def parse_template(path: Path, raw: str) -> TemplateSpec:
         priority=priority,
         mac_policy=mac_policy,
         warnings=tuple(warnings),
+        name_prefix=name_prefix,
+        detected_by=verdict.reason,
     )
 
 
@@ -185,7 +191,7 @@ def prefix_matches(node_name: str, prefix: str) -> bool:
 
 
 class TemplateMatcher:
-    """Chooses the single best template for a device."""
+    """Chooses the single best parent template for a device."""
 
     def __init__(self, templates: list[TemplateSpec] | None = None) -> None:
         self._templates: list[TemplateSpec] = list(templates or [])
@@ -237,14 +243,17 @@ class TemplateMatcher:
             if prefix_matches(device.node_name, prefix):
                 consider("prefix", prefix, len(prefix))
 
-        # Implicit rule: with no explicit prefix or regex, the filename stem is
-        # the prefix. This is what makes `cloudbay-t.yaml` work with no config.
-        if (
-            not template.match_prefixes
-            and not template.match_regexes
-            and prefix_matches(device.node_name, template.stem)
-        ):
-            consider("filename-prefix", template.stem, len(template.stem))
+        # Implicit rules, used when the parent declares no explicit pattern.
+        # The name-derived prefix comes first: `name: cloudbay-t-${mac}` states
+        # the family far more reliably than whatever the file happens to be
+        # called, which may just be `base.yaml`.
+        if not template.match_prefixes and not template.match_regexes:
+            if template.name_prefix and prefix_matches(
+                device.node_name, template.name_prefix
+            ):
+                consider("name-prefix", template.name_prefix, len(template.name_prefix))
+            if prefix_matches(device.node_name, template.stem):
+                consider("filename-prefix", template.stem, len(template.stem))
 
         for model in template.match_models:
             haystack = " ".join(

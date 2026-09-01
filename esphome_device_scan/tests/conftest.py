@@ -7,6 +7,7 @@ and deterministically.
 
 from __future__ import annotations
 
+import shutil
 import sys
 from pathlib import Path
 from typing import Any
@@ -27,10 +28,9 @@ from app.models import (
 from app.settings import Settings
 from app.templates import TemplateRepository, parse_template
 
-#: The add-on's real shipped templates. Tests read these rather than a copy,
-#: so the golden files in examples/generated/ can never drift from the
-#: templates the add-on actually installs.
-TEMPLATES = Path(__file__).resolve().parent.parent / "templates"
+#: Example parent templates. The add-on ships none -- these exist for the
+#: docs, and as fixtures that keep examples/generated/ honest.
+TEMPLATES = Path(__file__).resolve().parent.parent / "examples" / "parents"
 
 
 class FakeHaApi:
@@ -105,8 +105,30 @@ def make_registry_device(
 
 
 @pytest.fixture
-def shipped_templates_dir() -> Path:
+def example_parents_dir() -> Path:
     return TEMPLATES
+
+
+@pytest.fixture
+def parents_installed(esphome_dir: Path) -> Path:
+    """Put the example parents *in the ESPHome directory*, as a real setup has.
+
+    This is the shape the add-on actually runs against: the base configs the
+    user flashed from live alongside the per-device files generated from them.
+    Returns the same path as ``esphome_dir``, so a test can request both.
+    """
+    for src in sorted(TEMPLATES.glob("*.yaml")):
+        shutil.copyfile(src, esphome_dir / src.name)
+    return esphome_dir
+
+
+def generated_configs(esphome_dir: Path) -> list[Path]:
+    """Per-device files in the directory, excluding parents and backups."""
+    return sorted(
+        path
+        for path in esphome_dir.glob("*.yaml")
+        if path.name not in {p.name for p in TEMPLATES.glob("*.yaml")}
+    )
 
 
 @pytest.fixture
@@ -151,8 +173,8 @@ def store(esphome_dir: Path) -> EsphomeConfigStore:
 
 
 @pytest.fixture
-def templates_repo() -> TemplateRepository:
-    return TemplateRepository(TEMPLATES)
+def templates_repo(parents_installed: Path) -> TemplateRepository:
+    return TemplateRepository(parents_installed)
 
 
 @pytest.fixture
@@ -161,7 +183,6 @@ def settings(esphome_dir: Path) -> Settings:
 
     return Settings(
         esphome_config_dir=esphome_dir,
-        templates_dir=TEMPLATES,
         scan_interval_minutes=15,
         auto_generate=True,
         scan_on_startup=False,

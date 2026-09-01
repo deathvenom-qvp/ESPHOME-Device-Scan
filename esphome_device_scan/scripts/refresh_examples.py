@@ -59,7 +59,7 @@ def main() -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
 
     for template_name, device in CASES:
-        path = ROOT / "templates" / template_name
+        path = ROOT / "examples" / "parents" / template_name
         template = parse_template(path, path.read_text(encoding="utf-8"))
         generated = generator.generate(template, device)
 

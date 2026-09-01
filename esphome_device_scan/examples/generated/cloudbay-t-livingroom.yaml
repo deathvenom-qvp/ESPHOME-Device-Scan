@@ -4,19 +4,20 @@
 # MAC:      AA:BB:CC:DD:EE:FF
 # Safe to edit: a scan never overwrites this file.
 
-# CloudBay T -- base firmware template
+# CloudBay T -- base firmware, flashed to every cloudbay-t device.
 #
-# Matching directives. With none of these present the filename stem
-# ("cloudbay-t") is used as the prefix, which is already what we want here;
-# they are spelled out to document the behaviour.
+# This file needs no directives and no changes to work as a parent. ESPHome
+# Device Scan recognises it as a base config from the MAC-suffix logic in
+# esphome.name below, and reads the family it claims from that same name --
+# here, every cloudbay-t-* device.
 #
-# x-match-prefix: cloudbay-t
-# x-mac-policy:   suffix3
-# x-priority:     10
+# For each such device with no config of its own, the add-on writes a sibling
+# file with the real node name and the MAC-suffix logic resolved. This file is
+# never modified, and never counted as any device's own config.
 #
-# The device name below is a placeholder. ESPHome Device Scan replaces it with
-# the real discovered node name and neutralises the MAC-suffix logic when it
-# generates a per-device config from this file.
+# Directives are optional, and only needed to claim more than the name implies:
+# x-match-prefix, x-match-regex, x-match-model, x-mac-policy, x-priority, and
+# x-template (which forces parent status for a base carrying no MAC logic).
 
 substitutions:
   devicename: cloudbay-t-livingroom

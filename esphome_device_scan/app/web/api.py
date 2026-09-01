@@ -85,7 +85,11 @@ async def get_state(request: web.Request) -> web.Response:
             "templates": [
                 {
                     "name": t.name,
-                    "prefixes": list(t.match_prefixes) or [t.stem],
+                    "path": str(t.path),
+                    "detected_by": t.detected_by,
+                    "prefixes": list(t.match_prefixes)
+                    or [p for p in (t.name_prefix,) if p]
+                    or [t.stem],
                     "regexes": list(t.match_regexes),
                     "models": list(t.match_models),
                     "priority": t.priority,
@@ -97,7 +101,6 @@ async def get_state(request: web.Request) -> web.Response:
             ],
             "settings": {
                 "esphome_config_dir": str(settings.esphome_config_dir),
-                "templates_dir": str(settings.templates_dir),
                 "scan_interval_minutes": settings.scan_interval_minutes,
                 "auto_generate": settings.auto_generate,
                 "dry_run": settings.dry_run,

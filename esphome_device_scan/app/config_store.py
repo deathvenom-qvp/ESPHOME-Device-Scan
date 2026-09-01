@@ -11,6 +11,17 @@ matching the spec's "JSON-based database or YAML directory depending on version"
    Builder maintains (keys ``name``, ``friendly_name``, ``address``,
    ``esp_platform``). Cheap, and covers a config whose YAML we could not parse.
 
+Parent templates live in this same directory, so they are classified out (see
+:mod:`app.parents`) on both paths:
+
+* they are **excluded from the index**, because a parent is not any device's
+  config -- a base declaring ``name: switchboard`` must not make a real
+  ``switchboard`` device look already-configured; and
+* they are **protected from writes**, unconditionally. Without that, a device
+  named exactly ``cloudbay-t`` would target ``cloudbay-t.yaml`` -- the parent
+  itself -- and Regenerate would overwrite the base config every child is
+  built from.
+
 Writes are atomic and refuse to clobber by default; only an explicit regenerate
 passes ``overwrite=True``, and that takes a timestamped backup first.
 """
@@ -27,6 +38,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from . import yaml_compat as yc
+from .parents import classify
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -40,6 +52,10 @@ _SUBSTITUTION_RE = re.compile(r"\$\{([a-zA-Z0-9_]+)\}|\$([a-zA-Z0-9_]+)")
 
 class ConfigExistsError(Exception):
     """Raised when writing would overwrite a config and overwrite is False."""
+
+
+class ParentTemplateError(Exception):
+    """Raised when a write would land on a parent template."""
 
 
 @dataclass(frozen=True)
@@ -58,6 +74,7 @@ class EsphomeConfigStore:
     def __init__(self, root: Path) -> None:
         self._root = root
         self._cache: dict[str, ExistingConfig] | None = None
+        self._parents: set[Path] | None = None
 
     @property
     def root(self) -> Path:
@@ -70,6 +87,16 @@ class EsphomeConfigStore:
     def invalidate(self) -> None:
         """Drop the cached index; the next lookup re-reads the directory."""
         self._cache = None
+        self._parents = None
+
+    def parent_paths(self) -> set[Path]:
+        """Files in the directory classified as parent templates."""
+        if self._parents is None:
+            self.index()  # populates both, from one pass over the directory
+        return set(self._parents or ())
+
+    def is_parent(self, path: Path) -> bool:
+        return path in self.parent_paths()
 
     # -- reads -----------------------------------------------------------
 
@@ -79,14 +106,21 @@ class EsphomeConfigStore:
             return self._cache
 
         found: dict[str, ExistingConfig] = {}
+        parents: set[Path] = set()
 
         # Sidecar index first so the authoritative YAML pass can overwrite it.
         for node_name, path in self._scan_storage_json().items():
             found[node_name] = ExistingConfig(node_name, path, "storage")
-        for node_name, path in self._scan_yaml_files().items():
+        for node_name, path in self._scan_yaml_files(parents).items():
             found[node_name] = ExistingConfig(node_name, path, "yaml")
 
+        # A parent is nobody's device config, so it must not appear in the
+        # index -- including via a stale sidecar written before it became one.
+        for node_name in [k for k, v in found.items() if v.path in parents]:
+            del found[node_name]
+
         self._cache = found
+        self._parents = parents
         return found
 
     def has_config(self, node_name: str) -> bool:
@@ -117,8 +151,13 @@ class EsphomeConfigStore:
         """Where a config for ``node_name`` would be written."""
         return self._root / f"{node_name}.yaml"
 
-    def _scan_yaml_files(self) -> dict[str, Path]:
-        """Node name -> path, by parsing each YAML's declared esphome.name."""
+    def _scan_yaml_files(self, parents: set[Path] | None = None) -> dict[str, Path]:
+        """Node name -> path, by parsing each YAML's declared esphome.name.
+
+        One pass does double duty: files classified as parent templates are
+        collected into ``parents`` rather than indexed, so the caller learns
+        which paths to protect without re-reading the directory.
+        """
         results: dict[str, Path] = {}
         if not self._root.is_dir():
             return results
@@ -131,7 +170,13 @@ class EsphomeConfigStore:
             if path.name in IGNORED_NAMES or path.name.startswith("."):
                 continue
 
-            node_name = self._declared_name(path)
+            source = self._read(path)
+            if source is not None and classify(source, path).is_parent:
+                if parents is not None:
+                    parents.add(path)
+                continue
+
+            node_name = self._declared_name(path, source)
             if node_name:
                 results[node_name] = path
             else:
@@ -140,12 +185,19 @@ class EsphomeConfigStore:
                 results.setdefault(path.stem, path)
         return results
 
-    def _declared_name(self, path: Path) -> str | None:
-        """``esphome.name`` from a config, with substitutions resolved."""
+    @staticmethod
+    def _read(path: Path) -> str | None:
         try:
-            source = path.read_text(encoding="utf-8")
+            return path.read_text(encoding="utf-8")
         except (OSError, UnicodeDecodeError) as err:
             _LOGGER.debug("Cannot read %s: %s", path, err)
+            return None
+
+    def _declared_name(self, path: Path, source: str | None = None) -> str | None:
+        """``esphome.name`` from a config, with substitutions resolved."""
+        if source is None:
+            source = self._read(path)
+        if source is None:
             return None
 
         try:
@@ -251,6 +303,17 @@ class EsphomeConfigStore:
             if (overwrite and existing is not None and existing.path.exists())
             else self.target_path(node_name)
         )
+
+        # Unconditional, and checked even under overwrite. A device named
+        # exactly `cloudbay-t` targets `cloudbay-t.yaml` -- which is the parent
+        # every cloudbay-t-* config is generated from. Overwriting it would
+        # destroy the base firmware and leave nothing to regenerate from.
+        if self.is_parent(destination):
+            raise ParentTemplateError(
+                f"{destination.name} is a parent template, not a device config. "
+                f"Rename the device, or mark the file '# x-template: false' if it "
+                f"is not really a base config."
+            )
 
         if destination.exists() and not overwrite:
             raise ConfigExistsError(f"{destination} already exists")

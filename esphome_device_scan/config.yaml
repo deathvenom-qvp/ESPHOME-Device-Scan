@@ -1,6 +1,6 @@
 ---
 name: ESPHome Device Scan
-version: "1.0.0"
+version: "1.1.0"
 slug: esphome_device_scan
 description: >-
   Scans Home Assistant for ESPHome devices that have no YAML config, matches
@@ -32,15 +32,14 @@ homeassistant_api: true
 hassio_api: true
 hassio_role: default
 
-# homeassistant_config -> /homeassistant (ESPHome YAML lives in ./esphome)
-# addon_config         -> /config        (our templates, user-editable)
+# homeassistant_config -> /homeassistant. ESPHome YAML lives in ./esphome,
+# and that is also where parent templates are read from -- nothing is
+# copied in, so the add-on needs no config directory of its own.
 map:
   - homeassistant_config:rw
-  - addon_config:rw
 
 options:
   esphome_config_dir: /homeassistant/esphome
-  templates_dir: /config/templates
   scan_interval_minutes: 15
   auto_generate: true
   scan_on_startup: true
@@ -51,7 +50,6 @@ options:
 
 schema:
   esphome_config_dir: str
-  templates_dir: str
   scan_interval_minutes: int(1,1440)
   auto_generate: bool
   scan_on_startup: bool

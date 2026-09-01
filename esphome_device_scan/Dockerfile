@@ -14,7 +14,6 @@ RUN apk add --no-cache --virtual .build-deps gcc musl-dev python3-dev \
     && apk del .build-deps
 
 COPY app/ ./app/
-COPY templates/ ./seed-templates/
 COPY scripts/ ./scripts/
 COPY run.sh /run.sh
 RUN chmod a+x /run.sh

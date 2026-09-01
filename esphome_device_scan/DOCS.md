@@ -1,8 +1,12 @@
 # ESPHome Device Scan
 
 Finds ESPHome devices that Home Assistant knows about but that have no YAML
-config, matches each to a base template by naming pattern, and writes a
-per-device config with the real node name and the MAC-suffix logic resolved.
+config, matches each to the **parent (base) config already in your ESPHome
+directory**, and writes a per-device config with the real node name and the
+MAC-suffix logic resolved.
+
+Nothing is shipped with this add-on and nothing is copied into your config. The
+parent it builds from is the same file you flashed the batch with.
 
 ## Installation
 
@@ -11,39 +15,46 @@ per-device config with the real node name and the MAC-suffix logic resolved.
 3. Install **ESPHome Device Scan**, then **Start**.
 4. Open **Show in sidebar** or the add-on's **Open Web UI**.
 
-On first start the add-on copies its two example templates into
-`/addon_configs/<slug>_esphome_device_scan/templates/`.
+## What counts as a parent
 
-## How it decides what to do
+Parents and generated children share `/homeassistant/esphome/`, so the add-on
+classifies every file it finds. In order:
 
-For each ESPHome device Home Assistant knows about:
+| # | Rule | Result |
+|---|---|---|
+| 1 | Carries this add-on's generated header | **child** — we wrote it |
+| 2 | `# x-template: false` | **child** — forced |
+| 3 | `# x-template: true`, or any `# x-match-*` directive | **parent** — forced |
+| 4 | `esphome.name` contains `${mac}` / `$mac` | **parent** |
+| 5 | `name_add_mac_suffix: true` | **parent** |
+| 6 | anything else | **child** |
 
-| Situation | What happens |
-|---|---|
-| A YAML already declares this node name | Skipped. Never touched. |
-| No YAML, and a template matches | `<node-name>.yaml` is generated. |
-| No YAML, no template matches | Reported in the panel so you can add a template. |
-| `auto_generate: false` | Reported only; generate from the panel. |
-| `dry_run: true` | Reported as "would generate"; nothing is written. |
+Rules 4 and 5 are why this needs no setup: MAC-suffix logic is exactly what the
+add-on exists to resolve, and a per-device config never has it, because
+generation strips it. Your `cloudbay-t.yaml` is already a parent as it stands.
 
-**Existing files are never overwritten by a scan.** The only path that
-overwrites is the panel's **Regenerate** button, which copies the current file
-to `<name>.yaml.bak-<timestamp>` first.
+Use `# x-template: true` for a base config that has no MAC-suffix logic, and
+`# x-template: false` for a device config that legitimately keeps some.
 
-## Templates
+Parents are treated as parents everywhere it matters:
 
-Templates live in the add-on's own config directory (`templates_dir`, default
-`/config/templates` inside the container). A template is an ordinary ESPHome
-config -- `esphome config` validates it, and you can flash it directly.
+- **They never count as a device's config.** A parent declaring
+  `name: switchboard` will not make a real `switchboard` device look
+  already-configured.
+- **They are never written over**, not even by Regenerate. A device named
+  exactly `cloudbay-t` would otherwise target `cloudbay-t.yaml` and destroy the
+  base every child is built from.
 
-### Matching
+## Which devices a parent claims
 
-With no directives, the **filename stem is the prefix**. So `cloudbay-t.yaml`
-claims `cloudbay-t-livingroom`, `cloudbay-t-a1b2c3` and `cloudbay-t` itself, but
-**not** `cloudbay-tx-porch` -- prefixes only match on a hyphen boundary, so a
-neighbouring product name is never swallowed by accident.
+With no directives, a parent claims its own family, taken from its declared
+name: `name: cloudbay-t-${mac}` claims `cloudbay-t-*`. This is read from the
+name rather than the filename, so a parent called `base.yaml` still works.
 
-For anything more specific, add directives as comments in the template header
+Matching is on a **hyphen boundary**, so `cloudbay-t` claims
+`cloudbay-t-livingroom` and `cloudbay-t-a1b2c3` but never `cloudbay-tx-porch`.
+
+For anything more specific, add directives to the parent's header comment block
 (the run of comments before the first YAML key):
 
 ```yaml
@@ -54,16 +65,15 @@ For anything more specific, add directives as comments in the template header
 # x-priority:     10                   # higher wins a tie
 ```
 
-Precedence is **regex → explicit prefix → filename prefix → model**, then
-`priority`, then the longer pattern, then the alphabetically first filename.
-Matching is fully deterministic: the same devices and templates always produce
-the same result.
+Precedence: **regex → explicit prefix → name-derived prefix → filename →
+model**, then `priority`, then the longer pattern, then the alphabetically
+first filename. The result is fully deterministic.
 
-### What generation changes
+## What generation changes
 
 Only these, and nothing else:
 
-| Template | Generated |
+| Parent | Generated child |
 |---|---|
 | `name: cloudbay-t-${mac}` | `name: cloudbay-t-livingroom` |
 | `name_add_mac_suffix: true` | `name_add_mac_suffix: false` |
@@ -72,14 +82,23 @@ Only these, and nothing else:
 | `friendly_name: "${friendly} ${mac}"` | the device's friendly name |
 | `${mac}` elsewhere, undeclared | substituted inline |
 
-Everything else -- comments, blank lines, key order, quoting style, `!secret`
-and `!lambda` tags, anchors -- is copied through byte for byte. The generator
+Everything else — comments, blank lines, key order, quoting style, `!secret`
+and `!lambda` tags, anchors — is copied through byte for byte. The generator
 locates values with a YAML parser but edits the original text, so nothing is
 reformatted on the way through.
 
-A short provenance header is prepended, naming the template, device and MAC. It
+A short provenance header is prepended, naming the parent, device and MAC. It
 carries no timestamp, deliberately: generation is idempotent, so regenerating an
-unchanged device produces an identical file.
+unchanged device produces an identical file. That header is also how the add-on
+knows never to mistake its own output for a parent.
+
+## Safety
+
+| | |
+|---|---|
+| A scan | Only ever **creates**. Never overwrites anything. |
+| Regenerate | The only overwriting path. Takes a `.bak-<timestamp>` copy first, and rewrites the file that actually holds the node name — so your filename is kept and you never end up with two configs claiming one name. |
+| Parents | Never written to, under any path. |
 
 ## MAC addresses
 
@@ -90,17 +109,16 @@ place (a literal `${mac}` would fail to compile), and the panel shows a warning.
 
 `mac_policy` controls what replaces `${mac}` outside the node name:
 
-- `suffix3` (default) -- last three bytes, `aabbcc`, matching ESPHome's own
+- `suffix3` (default) — last three bytes, `aabbcc`, matching ESPHome's own
   `name_add_mac_suffix` format
-- `full` -- `aabbccddeeff`
-- `strip` -- remove the placeholder and any separator right before it
+- `full` — `aabbccddeeff`
+- `strip` — remove the placeholder and any separator right before it
 
 ## Options
 
 | Option | Default | Notes |
 |---|---|---|
-| `esphome_config_dir` | `/homeassistant/esphome` | Where ESPHome YAML lives |
-| `templates_dir` | `/config/templates` | Your base templates |
+| `esphome_config_dir` | `/homeassistant/esphome` | Where configs live **and** where parents are read from |
 | `scan_interval_minutes` | `15` | 1–1440 |
 | `auto_generate` | `true` | Off = report only |
 | `scan_on_startup` | `true` | |
@@ -110,6 +128,22 @@ place (a literal `${mac}` would fail to compile), and the panel shows a warning.
 | `log_level` | `info` | |
 
 ## Troubleshooting
+
+**"No parent templates found."**
+Nothing in the ESPHome directory looked like a base config. Check that your
+parent still has its MAC-suffix logic — if you have already removed it, add
+`# x-template: true` to its header instead. The panel's **Parent templates**
+panel shows every parent found and why it was recognised.
+
+**A device shows "No template".**
+A parent exists, but none claims that device's name. Compare the device's node
+name with the parent's family prefix; remember the hyphen boundary. Add
+`# x-match-prefix:` to the parent to claim more.
+
+**"… is a parent template, not a device config."**
+A device's node name collides with a parent's filename. The add-on refused to
+overwrite the parent. Rename the device in Home Assistant, or mark the file
+`# x-template: false` if it is not really a base config.
 
 **"No ESPHome devices found."**
 The add-on reads Home Assistant's registries, so a device must already be added
@@ -124,17 +158,12 @@ placeholders are stripped. Run the probe to confirm what your instance returns:
 docker exec addon_<slug> python3 /opt/edscan/scripts/probe_ha.py
 ```
 
-**A device shows "No template".**
-No template matched its node name. Either name a template after the device's
-prefix, or add `# x-match-prefix:` to an existing one. The panel's **Templates**
-panel lists every rule currently in force.
-
 **The node name looks wrong.**
 The ESPHome node name is not directly exposed over Home Assistant's WebSocket
 API, so it is derived: config entry title first (which ESPHome sets from the
 device name), then a slugified friendly name, then `esphome-<mac>`. The
 `name_source` field on each row records which was used. If it guessed wrong,
-create the YAML by hand -- the add-on will then skip that device.
+create the YAML by hand — the add-on will then skip that device.
 
 **Nothing is being written.**
 Check `dry_run` and `auto_generate`, and that `esphome_config_dir` points at a

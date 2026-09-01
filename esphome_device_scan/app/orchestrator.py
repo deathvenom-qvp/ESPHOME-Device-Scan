@@ -16,7 +16,7 @@ import logging
 import time
 from datetime import UTC, datetime
 
-from .config_store import ConfigExistsError, EsphomeConfigStore
+from .config_store import ConfigExistsError, EsphomeConfigStore, ParentTemplateError
 from .discovery import DeviceDiscoveryService
 from .generator import YamlGenerator
 from .models import Device, DeviceReport, Outcome, ScanReport
@@ -128,8 +128,9 @@ class ScanOrchestrator:
                 outcome=Outcome.NO_TEMPLATE_MATCH,
                 has_yaml=False,
                 message=(
-                    f"No template matches '{device.node_name}'. Add a template "
-                    f"named after its prefix, or an '# x-match-prefix:' directive."
+                    f"No parent template matches '{device.node_name}'. Its base "
+                    f"config must be in the ESPHome directory and carry MAC-suffix "
+                    f"logic, or be marked '# x-template: true'."
                 ),
             )
 
@@ -203,6 +204,12 @@ class ScanOrchestrator:
         except ConfigExistsError as err:
             return DeviceReport(
                 device=device, outcome=Outcome.SKIPPED_HAS_CONFIG, has_yaml=True,
+                template_name=template.name, match_rule=match.rule, message=str(err),
+            )
+        except ParentTemplateError as err:
+            _LOGGER.error("%s: %s", device.node_name, err)
+            return DeviceReport(
+                device=device, outcome=Outcome.ERROR, has_yaml=False,
                 template_name=template.name, match_rule=match.rule, message=str(err),
             )
         except OSError as err:

@@ -211,7 +211,7 @@ def test_bad_regex_in_a_template_does_not_break_matching() -> None:
 # -- repository -------------------------------------------------------------
 
 
-def test_repository_loads_shipped_templates(templates_repo: TemplateRepository) -> None:
+def test_repository_loads_the_example_parents(templates_repo: TemplateRepository) -> None:
     names = {t.name for t in templates_repo.load_all()}
     assert {"cloudbay-t.yaml", "switchboard.yaml"} <= names
 
@@ -220,28 +220,11 @@ def test_repository_handles_a_missing_directory(tmp_path: Path) -> None:
     assert TemplateRepository(tmp_path / "nope").load_all() == []
 
 
-def test_repository_skips_non_yaml(tmp_path: Path) -> None:
+def test_repository_returns_only_parents(tmp_path: Path) -> None:
+    """A per-device config sharing the directory must not become a template."""
     tmp_path.joinpath("notes.txt").write_text("hello")
-    tmp_path.joinpath("real.yaml").write_text("esphome:\n  name: real\n")
-    assert [t.name for t in TemplateRepository(tmp_path).load_all()] == ["real.yaml"]
-
-
-def test_seeding_copies_examples_then_stops(tmp_path: Path, shipped_templates_dir: Path) -> None:
-    target = tmp_path / "templates"
-    repo = TemplateRepository(target, shipped_templates_dir)
-
-    assert repo.ensure_seeded() == 2
-    # Second call is a no-op: a user's own templates are never overwritten.
-    assert repo.ensure_seeded() == 0
-
-
-def test_seeding_skips_a_directory_that_already_has_templates(
-    tmp_path: Path, shipped_templates_dir: Path
-) -> None:
-    target = tmp_path / "templates"
-    target.mkdir()
-    (target / "mine.yaml").write_text("esphome:\n  name: mine\n")
-
-    repo = TemplateRepository(target, shipped_templates_dir)
-    assert repo.ensure_seeded() == 0
-    assert [p.name for p in target.iterdir()] == ["mine.yaml"]
+    tmp_path.joinpath("child.yaml").write_text("esphome:\n  name: real-device\n")
+    tmp_path.joinpath("parent.yaml").write_text(
+        "esphome:\n  name: fam-${mac}\n"
+    )
+    assert [t.name for t in TemplateRepository(tmp_path).load_all()] == ["parent.yaml"]

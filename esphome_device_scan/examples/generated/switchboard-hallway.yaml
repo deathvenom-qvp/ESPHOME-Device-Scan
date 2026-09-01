@@ -4,11 +4,16 @@
 # MAC:      11:22:33:44:55:66
 # Safe to edit: a scan never overwrites this file.
 
-# Switchboard -- 4-gang relay board
+# Switchboard -- 4-gang relay board.
 #
-# Demonstrates the other MAC-suffix idiom: no ${mac} substitution anywhere,
-# just ESPHome's own `name_add_mac_suffix`. The generator turns that off and
-# writes the discovered name into `esphome.name`.
+# Demonstrates two things the cloudbay-t example does not:
+#
+# 1. The other MAC-suffix idiom -- no ${mac} substitution anywhere, just
+#    ESPHome's own `name_add_mac_suffix`. That alone is enough to mark this a
+#    parent, and the bare `name:` below is the family it claims.
+# 2. Explicit directives, for when the name is not enough. Here they add a
+#    second prefix ("swb-*") and a match on the device's model as Home
+#    Assistant reports it.
 #
 # x-match-prefix: switchboard, swb
 # x-match-model:  Switchboard

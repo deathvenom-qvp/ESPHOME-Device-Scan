@@ -148,10 +148,16 @@ class TemplateSpec:
     mac_policy: MacPolicy | None = None
     #: Directives that were present but unparseable, surfaced in the UI.
     warnings: tuple[str, ...] = ()
+    #: Family prefix taken from the parent's own ``esphome.name``:
+    #: ``cloudbay-t-${mac}`` yields ``cloudbay-t``. More reliable than the
+    #: filename, which may be anything.
+    name_prefix: str | None = None
+    #: Why this file was classified as a parent (see :mod:`app.parents`).
+    detected_by: str = "unknown"
 
     @property
     def stem(self) -> str:
-        """Filename without extension -- the implicit prefix when undeclared."""
+        """Filename without extension -- the last-resort implicit prefix."""
         return self.path.stem
 
 

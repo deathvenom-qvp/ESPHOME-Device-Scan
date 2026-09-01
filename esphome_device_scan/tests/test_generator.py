@@ -72,7 +72,7 @@ def test_only_the_intended_lines_change(cloudbay_template, device, generator) ->
 
 def test_comments_survive(cloudbay_template, device, generator) -> None:
     out = generator.generate(cloudbay_template, device)
-    assert "# CloudBay T -- base firmware template" in out.content
+    assert "# CloudBay T -- base firmware, flashed to every cloudbay-t device." in out.content
     assert "# Fallback hotspot, used when the configured network is unreachable." in out.content
 
 

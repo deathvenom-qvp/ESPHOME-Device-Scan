@@ -25,7 +25,6 @@ INGRESS_PEER = "172.30.32.2"
 
 DEFAULTS: dict[str, object] = {
     "esphome_config_dir": "/homeassistant/esphome",
-    "templates_dir": "/config/templates",
     "scan_interval_minutes": 15,
     "auto_generate": True,
     "scan_on_startup": True,
@@ -71,7 +70,6 @@ class Settings:
     """Resolved, validated add-on options."""
 
     esphome_config_dir: Path
-    templates_dir: Path
     scan_interval_minutes: int
     auto_generate: bool
     scan_on_startup: bool
@@ -79,8 +77,6 @@ class Settings:
     name_add_mac_suffix_action: MacSuffixAction
     dry_run: bool
     log_level: int
-    #: Bundled templates copied into templates_dir when it is empty.
-    seed_templates_dir: Path | None = None
     supervisor_token: str | None = None
     supervisor_base_url: str = "http://supervisor/core"
     web_host: str = "0.0.0.0"  # noqa: S104 - ingress requires binding all ifaces
@@ -140,11 +136,8 @@ def load_settings(
         _LOGGER.warning("Unknown log_level %r; using 'info'", raw_level)
     log_level = LOG_LEVELS.get(raw_level, logging.INFO)
 
-    seed = environ.get("EDSCAN_SEED_TEMPLATES_DIR")
-
     return Settings(
         esphome_config_dir=Path(str(opt("esphome_config_dir"))).expanduser(),
-        templates_dir=Path(str(opt("templates_dir"))).expanduser(),
         scan_interval_minutes=_as_int(opt("scan_interval_minutes"), 15, 1, 1440),
         auto_generate=_as_bool(opt("auto_generate"), True),
         scan_on_startup=_as_bool(opt("scan_on_startup"), True),
@@ -152,7 +145,6 @@ def load_settings(
         name_add_mac_suffix_action=suffix_action,
         dry_run=_as_bool(opt("dry_run"), False),
         log_level=log_level,
-        seed_templates_dir=Path(seed) if seed else None,
         supervisor_token=environ.get("SUPERVISOR_TOKEN"),
         supervisor_base_url=environ.get("EDSCAN_SUPERVISOR_URL", "http://supervisor/core"),
         web_port=_as_int(environ.get("EDSCAN_WEB_PORT", 8099), 8099, 1, 65535),

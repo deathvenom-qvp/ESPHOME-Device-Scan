@@ -6,7 +6,12 @@ import asyncio
 from pathlib import Path
 
 import pytest
-from conftest import FakeHaApi, make_entry, make_registry_device
+from conftest import (
+    FakeHaApi,
+    generated_configs,
+    make_entry,
+    make_registry_device,
+)
 
 from app.config_store import EsphomeConfigStore
 from app.discovery import DeviceDiscoveryService
@@ -25,7 +30,7 @@ def build(settings, ha: FakeHaApi) -> ScanOrchestrator:
     return ScanOrchestrator(
         discovery=DeviceDiscoveryService(ha),
         store=EsphomeConfigStore(settings.esphome_config_dir),
-        templates=TemplateRepository(settings.templates_dir),
+        templates=TemplateRepository(settings.esphome_config_dir),
         generator=YamlGenerator(
             settings.mac_policy, settings.name_add_mac_suffix_action
         ),
@@ -98,7 +103,9 @@ async def test_collision_without_a_mac_still_resolves() -> None:
     assert len(names) == len(set(names))
 
 
-async def test_two_colliding_devices_generate_two_files(settings, esphome_dir) -> None:
+async def test_two_colliding_devices_generate_two_files(
+    settings, esphome_dir, parents_installed
+) -> None:
     ha = FakeHaApi(
         config_entries=[
             make_entry("e1", "CloudBay T Porch"),
@@ -112,7 +119,7 @@ async def test_two_colliding_devices_generate_two_files(settings, esphome_dir) -
     report = await build(settings, ha).scan()
 
     assert report.count(Outcome.GENERATED) == 2
-    assert len(list(esphome_dir.glob("*.yaml"))) == 2
+    assert len(generated_configs(esphome_dir)) == 2
 
 
 # -- config store -----------------------------------------------------------
@@ -270,7 +277,9 @@ def test_every_declared_mac_substitution_is_patched(generator) -> None:
 # -- orchestrator -----------------------------------------------------------
 
 
-async def test_generate_updates_the_cached_report(settings, esphome_dir) -> None:
+async def test_generate_updates_the_cached_report(
+    settings, esphome_dir, parents_installed
+) -> None:
     """The panel polls /api/state after Generate; a stale report showed the
     device as still unconfigured until the next full scan."""
     ha = FakeHaApi(

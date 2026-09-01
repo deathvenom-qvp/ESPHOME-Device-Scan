@@ -1,5 +1,35 @@
 # Changelog
 
+## 1.1.0
+
+**Parent templates now come from your ESPHome directory.** The add-on no longer
+ships templates, has no `templates_dir` option, and copies nothing into your
+config on first start. The base config it generates from is the one already in
+`/homeassistant/esphome/` — the file you flashed the batch with.
+
+- A file is recognised as a parent by its MAC-suffix logic: `${mac}` in
+  `esphome.name`, or `name_add_mac_suffix: true`. No directives needed.
+  `# x-template: true` forces it for a base without that logic;
+  `# x-template: false` forces the opposite.
+- A parent's family is read from its own declared name, so
+  `name: cloudbay-t-${mac}` claims `cloudbay-t-*` regardless of what the file is
+  called. Matching still requires a hyphen boundary.
+- Parents are excluded from the "already configured" index, so a base declaring
+  `name: switchboard` no longer makes a real `switchboard` device look done.
+- Parents are protected from writes on every path, including Regenerate. A
+  device named exactly `cloudbay-t` can no longer overwrite `cloudbay-t.yaml`.
+- Generated files carry a header that marks them as children, so a scan never
+  mistakes its own output for a base config.
+- `map:` drops `addon_config`; the add-on needs no config directory of its own.
+- The panel's Templates section now shows where parents were read from and why
+  each was recognised.
+- Example parents moved to `examples/parents/` as documentation and test
+  fixtures only. They are never installed.
+
+**Migrating from 1.0.0:** remove the `templates_dir` option if you set it, and
+make sure your base configs are in the ESPHome directory. Anything you had in a
+separate templates folder should be moved there.
+
 ## 1.0.0
 
 Initial release.

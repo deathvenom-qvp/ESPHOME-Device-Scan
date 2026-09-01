@@ -11,7 +11,12 @@ from dataclasses import replace
 
 import pytest
 from aiohttp.test_utils import TestClient, TestServer
-from conftest import FakeHaApi, make_entry, make_registry_device
+from conftest import (
+    FakeHaApi,
+    generated_configs,
+    make_entry,
+    make_registry_device,
+)
 
 from app.config_store import EsphomeConfigStore
 from app.discovery import DeviceDiscoveryService
@@ -29,7 +34,7 @@ def build_stack(settings, ha: FakeHaApi):
     orchestrator = ScanOrchestrator(
         discovery=DeviceDiscoveryService(ha),
         store=EsphomeConfigStore(settings.esphome_config_dir),
-        templates=TemplateRepository(settings.templates_dir),
+        templates=TemplateRepository(settings.esphome_config_dir),
         generator=generator,
         settings=settings,
     )
@@ -38,7 +43,7 @@ def build_stack(settings, ha: FakeHaApi):
 
 
 @pytest.fixture
-async def client(settings):
+async def client(settings, parents_installed):
     """A test client with the ingress peer check relaxed."""
     local = replace(settings, enforce_ingress_peer=False)
     ha = FakeHaApi(
@@ -127,7 +132,7 @@ async def test_preview_renders_without_writing(client, esphome_dir) -> None:
 
     assert "name: cloudbay-t-livingroom" in data["content"]
     assert data["template"] == "cloudbay-t.yaml"
-    assert list(esphome_dir.iterdir()) == []  # nothing written
+    assert generated_configs(esphome_dir) == []  # nothing written
 
 
 async def test_preview_404s_for_an_unknown_device(client) -> None:
