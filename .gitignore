@@ -11,3 +11,6 @@ htmlcov/
 
 # Local scratch for offline dry runs
 /scratch/
+
+# Stray PID files from local test servers
+*.pid
