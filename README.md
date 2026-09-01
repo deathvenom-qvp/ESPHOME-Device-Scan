@@ -1,0 +1,1 @@
+# ESPHOME-Device-Scan
