@@ -103,8 +103,13 @@ They are documentation and test fixtures only — the add-on never installs them
 ## Panel
 
 An ingress panel lists every device with its node name, MAC, connection status,
-whether it has a config and which template matched, plus **Preview**,
+whether it has a config and which parent matched, plus **Preview**,
 **Generate**, **View** and **Regenerate** actions and a live activity log.
+
+**Regenerate all** rebuilds every matched device from its parent in one go —
+for after you have edited a parent. It shows what it will touch first, calls
+out any config you wrote or edited by hand, and offers to skip those. Every
+replaced file is backed up.
 
 Full documentation: [`esphome_device_scan/DOCS.md`](esphome_device_scan/DOCS.md).
 
@@ -115,7 +120,7 @@ cd esphome_device_scan
 pip install -r requirements.txt
 pip install pytest pytest-asyncio ruff
 
-pytest -q                              # 243 tests
+pytest -q                              # 261 tests
 ruff check app/ scripts/ tests/
 
 # Offline dry run, no Home Assistant needed. Put a parent in the directory

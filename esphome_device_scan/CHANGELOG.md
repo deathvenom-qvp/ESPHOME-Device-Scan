@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.2.0
+
+- **Regenerate all** button in the panel header: rebuilds every matched
+  device's config from its parent template in one action, for after a parent
+  changes.
+- It previews first. The confirmation names how many configs it generated,
+  how many are missing and will be created, and — separately, device by
+  device — how many were written or edited by hand and would lose that
+  content. **Skip hand-edited** rebuilds everything except those.
+- Every replaced file is backed up as `.bak-<timestamp>`; parents are
+  excluded, as on every other path.
+- New endpoints: `GET /api/regenerate-all/plan` (writes nothing) and
+  `POST /api/regenerate-all[?skip_edited=1]`.
+- Scan summaries now name only what happened, so a bulk run reads
+  "3 regenerated" rather than "0 generated, 0 pending, 0 already configured".
+
 ## 1.1.0
 
 **Parent templates now come from your ESPHome directory.** The add-on no longer

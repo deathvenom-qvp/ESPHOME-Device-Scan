@@ -97,8 +97,25 @@ knows never to mistake its own output for a parent.
 | | |
 |---|---|
 | A scan | Only ever **creates**. Never overwrites anything. |
-| Regenerate | The only overwriting path. Takes a `.bak-<timestamp>` copy first, and rewrites the file that actually holds the node name — so your filename is kept and you never end up with two configs claiming one name. |
+| Regenerate | Per-device. Takes a `.bak-<timestamp>` copy first, and rewrites the file that actually holds the node name — so your filename is kept and you never end up with two configs claiming one name. |
+| Regenerate all | The same, for every matched device at once. See below. |
 | Parents | Never written to, under any path. |
+
+### Regenerate all
+
+The **Regenerate all** button in the panel header rebuilds every matched
+device's config from its parent — the thing to press after editing a parent
+and wanting the whole family brought back in line.
+
+Before anything is written it shows exactly what will happen, split three
+ways: configs it generated and nobody has touched, configs with **no** file
+yet (which get created), and configs **written or edited by hand**. That last
+group is the one that loses content, so it is named device by device, and the
+dialog offers **Skip hand-edited** to rebuild everything else and leave those
+alone.
+
+Every replaced file is backed up as `<name>.yaml.bak-<timestamp>` first, and
+parents are excluded as always. Devices with no matching parent are skipped.
 
 ## MAC addresses
 

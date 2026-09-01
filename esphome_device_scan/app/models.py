@@ -222,13 +222,21 @@ class ScanReport:
 
     @property
     def summary(self) -> str:
-        generated = self.count(Outcome.GENERATED)
-        would = self.count(Outcome.WOULD_GENERATE)
-        skipped = self.count(Outcome.SKIPPED_HAS_CONFIG)
-        unmatched = self.count(Outcome.NO_TEMPLATE_MATCH)
-        errors = self.count(Outcome.ERROR)
-        return (
-            f"{len(self.devices)} device(s): {generated} generated, "
-            f"{would} pending, {skipped} already configured, "
-            f"{unmatched} unmatched, {errors} error(s)"
-        )
+        """One line describing the pass, naming only what actually happened.
+
+        Built from the non-zero counts rather than a fixed list, so a bulk
+        regenerate reads "3 regenerated" instead of "0 generated, 0 pending,
+        0 already configured" -- which is what a fixed list produced.
+        """
+        parts = [
+            (self.count(Outcome.GENERATED), "generated"),
+            (self.count(Outcome.REGENERATED), "regenerated"),
+            (self.count(Outcome.WOULD_GENERATE), "pending"),
+            (self.count(Outcome.SKIPPED_HAS_CONFIG), "already configured"),
+            (self.count(Outcome.SKIPPED_AUTO_GENERATE_OFF), "awaiting generation"),
+            (self.count(Outcome.NO_TEMPLATE_MATCH), "unmatched"),
+            (self.count(Outcome.ERROR), "error(s)"),
+        ]
+        described = [f"{count} {label}" for count, label in parts if count]
+        detail = ", ".join(described) if described else "nothing to do"
+        return f"{len(self.devices)} device(s): {detail}"

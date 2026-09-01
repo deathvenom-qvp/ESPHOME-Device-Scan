@@ -38,7 +38,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from . import yaml_compat as yc
-from .parents import classify
+from .parents import classify, is_generated
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -66,6 +66,11 @@ class ExistingConfig:
     path: Path
     #: "yaml" when read from the file, "storage" when only the sidecar knew.
     source: str
+    #: True when the file still carries this add-on's generated header, i.e.
+    #: nobody has rewritten it since. False means hand-written, or generated and
+    #: then edited -- either way, content a bulk regenerate would destroy, so
+    #: the panel counts these separately before asking for confirmation.
+    generated: bool = False
 
 
 class EsphomeConfigStore:
@@ -111,8 +116,7 @@ class EsphomeConfigStore:
         # Sidecar index first so the authoritative YAML pass can overwrite it.
         for node_name, path in self._scan_storage_json().items():
             found[node_name] = ExistingConfig(node_name, path, "storage")
-        for node_name, path in self._scan_yaml_files(parents).items():
-            found[node_name] = ExistingConfig(node_name, path, "yaml")
+        found.update(self._scan_yaml_files(parents))
 
         # A parent is nobody's device config, so it must not appear in the
         # index -- including via a stale sidecar written before it became one.
@@ -151,14 +155,17 @@ class EsphomeConfigStore:
         """Where a config for ``node_name`` would be written."""
         return self._root / f"{node_name}.yaml"
 
-    def _scan_yaml_files(self, parents: set[Path] | None = None) -> dict[str, Path]:
-        """Node name -> path, by parsing each YAML's declared esphome.name.
+    def _scan_yaml_files(
+        self, parents: set[Path] | None = None
+    ) -> dict[str, ExistingConfig]:
+        """Node name -> config, by parsing each YAML's declared esphome.name.
 
-        One pass does double duty: files classified as parent templates are
-        collected into ``parents`` rather than indexed, so the caller learns
-        which paths to protect without re-reading the directory.
+        One pass does triple duty: files classified as parent templates are
+        collected into ``parents`` rather than indexed, and each remaining file
+        is marked with whether it still carries our generated header -- all
+        without reading the directory more than once.
         """
-        results: dict[str, Path] = {}
+        results: dict[str, ExistingConfig] = {}
         if not self._root.is_dir():
             return results
 
@@ -176,13 +183,16 @@ class EsphomeConfigStore:
                     parents.add(path)
                 continue
 
+            generated = source is not None and is_generated(source)
             node_name = self._declared_name(path, source)
             if node_name:
-                results[node_name] = path
+                results[node_name] = ExistingConfig(node_name, path, "yaml", generated)
             else:
                 # Unparseable, or a package/fragment with no esphome block.
                 # Fall back to the filename so we still never clobber it.
-                results.setdefault(path.stem, path)
+                results.setdefault(
+                    path.stem, ExistingConfig(path.stem, path, "yaml", generated)
+                )
         return results
 
     @staticmethod
@@ -335,7 +345,9 @@ class EsphomeConfigStore:
         # after each write, making a first scan of N new devices O(N^2) file
         # parses; this keeps it linear while staying just as accurate.
         if self._cache is not None:
-            self._cache[node_name] = ExistingConfig(node_name, destination, "yaml")
+            self._cache[node_name] = ExistingConfig(
+                node_name, destination, "yaml", is_generated(content)
+            )
 
         _LOGGER.info("Wrote %s", destination)
         return destination

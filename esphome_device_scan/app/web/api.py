@@ -118,6 +118,41 @@ async def post_scan(request: web.Request) -> web.Response:
     return web.json_response(scan_to_json(report))
 
 
+@routes.get("/api/regenerate-all/plan")
+async def get_regenerate_all_plan(request: web.Request) -> web.Response:
+    """What a bulk regenerate would touch. Writes nothing.
+
+    The panel fetches this before showing its confirmation, so the warning can
+    name real numbers -- particularly how many files were edited by hand and
+    would lose that content.
+    """
+    orchestrator: ScanOrchestrator = request.app[ORCHESTRATOR]
+    plan = await orchestrator.plan_regenerate_all()
+    return web.json_response(
+        {
+            "total": plan.total,
+            "untouched": list(plan.untouched),
+            "edited": list(plan.edited),
+            "missing": list(plan.missing),
+            "unmatched": list(plan.unmatched),
+            "error": plan.error,
+        },
+        status=500 if plan.error else 200,
+    )
+
+
+@routes.post("/api/regenerate-all")
+async def post_regenerate_all(request: web.Request) -> web.Response:
+    """Rebuild every matched device's config from its parent template.
+
+    ``?skip_edited=1`` leaves hand-written and hand-edited files alone.
+    """
+    scheduler: ScanScheduler = request.app[SCHEDULER]
+    skip_edited = request.query.get("skip_edited", "").lower() in ("1", "true", "yes")
+    report = await scheduler.regenerate_all_now(skip_edited=skip_edited)
+    return web.json_response(scan_to_json(report))
+
+
 @routes.post("/api/generate/{node_name}")
 async def post_generate(request: web.Request) -> web.Response:
     """Generate for one device, refusing to overwrite an existing file."""

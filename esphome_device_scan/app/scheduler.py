@@ -57,6 +57,15 @@ class ScanScheduler:
         async with self._lock:
             return await self._orchestrator.scan()
 
+    async def regenerate_all_now(self, *, skip_edited: bool = False):
+        """Rebuild every matched device's config, holding the scan lock.
+
+        Sharing the lock with scan_now() is the point: a scheduled scan
+        must not be part-way through writing the same files.
+        """
+        async with self._lock:
+            return await self._orchestrator.regenerate_all(skip_edited=skip_edited)
+
     async def _run(self) -> None:
         if self._scan_on_startup:
             await self._safe_scan()
