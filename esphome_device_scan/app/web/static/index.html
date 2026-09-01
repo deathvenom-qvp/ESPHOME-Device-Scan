@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <!-- Injected by the server from the X-Ingress-Path header so every relative
+       URL below resolves inside the ingress prefix. -->
+  <base href="{{BASE_HREF}}">
+  <title>ESPHome Device Scan</title>
+  <link rel="stylesheet" href="static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="topbar-title">
+      <h1>ESPHome Device Scan</h1>
+      <p id="summary" class="summary">Loading…</p>
+    </div>
+    <div class="topbar-actions">
+      <button id="scan-btn" class="btn btn-primary">Scan now</button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner" hidden></div>
+
+  <main>
+    <section class="panel">
+      <div class="panel-head">
+        <h2>Devices</h2>
+        <label class="filter">
+          <input type="checkbox" id="filter-missing">
+          Only show devices without a config
+        </label>
+      </div>
+      <div class="table-scroll">
+        <table id="devices">
+          <thead>
+            <tr>
+              <th>Device</th>
+              <th>Node name</th>
+              <th>MAC</th>
+              <th>Status</th>
+              <th>Config</th>
+              <th>Template</th>
+              <th class="actions-col">Actions</th>
+            </tr>
+          </thead>
+          <tbody id="devices-body">
+            <tr><td colspan="7" class="empty">Loading devices…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <div class="columns">
+      <section class="panel">
+        <div class="panel-head"><h2>Templates</h2></div>
+        <div id="templates" class="templates">
+          <p class="empty">Loading…</p>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>Activity log</h2>
+          <button id="clear-log" class="btn btn-ghost btn-small">Clear view</button>
+        </div>
+        <div id="logs" class="logs"><p class="empty">No activity yet.</p></div>
+      </section>
+    </div>
+
+    <section class="panel">
+      <div class="panel-head"><h2>Configuration</h2></div>
+      <dl id="settings" class="settings"></dl>
+    </section>
+  </main>
+
+  <div id="modal" class="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-head">
+        <div>
+          <h3 id="modal-title">YAML</h3>
+          <p id="modal-path" class="modal-path"></p>
+        </div>
+        <button id="modal-close" class="btn btn-ghost btn-small" aria-label="Close">Close</button>
+      </div>
+      <pre id="modal-body" class="yaml"></pre>
+    </div>
+  </div>
+
+  <script src="static/app.js"></script>
+</body>
+</html>

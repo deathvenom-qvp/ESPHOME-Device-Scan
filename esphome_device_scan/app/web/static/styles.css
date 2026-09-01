@@ -1,0 +1,325 @@
+/* Panel styling.
+   Colours are declared as custom properties on :root (light) and re-declared
+   under prefers-color-scheme: dark, so the panel follows the Home Assistant
+   theme the user is already in rather than fighting it. */
+
+:root {
+  --bg: #f5f6f8;
+  --surface: #ffffff;
+  --surface-alt: #fafbfc;
+  --border: #e1e4e8;
+  --text: #1c1e21;
+  --text-dim: #5c6370;
+  --accent: #03a9f4;
+  --accent-text: #ffffff;
+  --ok: #2e7d32;
+  --ok-bg: #e6f4ea;
+  --warn: #a15c00;
+  --warn-bg: #fdf3e2;
+  --err: #b3261e;
+  --err-bg: #fce8e6;
+  --idle: #5c6370;
+  --idle-bg: #eceef0;
+  --shadow: 0 1px 3px rgba(0, 0, 0, .08), 0 1px 2px rgba(0, 0, 0, .04);
+  --radius: 10px;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #111418;
+    --surface: #1b1f24;
+    --surface-alt: #22272e;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-dim: #9198a1;
+    --accent: #38bdf8;
+    --accent-text: #06202e;
+    --ok: #7ee2a8;
+    --ok-bg: #10281a;
+    --warn: #f0c274;
+    --warn-bg: #2c2312;
+    --err: #ff8b83;
+    --err-bg: #2d1513;
+    --idle: #9198a1;
+    --idle-bg: #262b32;
+    --shadow: 0 1px 3px rgba(0, 0, 0, .4);
+  }
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+
+/* -- top bar -------------------------------------------------------- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 18px 20px;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.topbar h1 { margin: 0; font-size: 19px; font-weight: 600; }
+.summary { margin: 3px 0 0; color: var(--text-dim); font-size: 13px; }
+
+main {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.columns {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr);
+  gap: 18px;
+}
+
+@media (max-width: 860px) {
+  .columns { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* -- panels --------------------------------------------------------- */
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.panel-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 13px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-alt);
+}
+
+.panel-head h2 { margin: 0; font-size: 14px; font-weight: 600; letter-spacing: .01em; }
+
+.filter {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 13px;
+  color: var(--text-dim);
+  cursor: pointer;
+  user-select: none;
+}
+
+/* -- table ---------------------------------------------------------- */
+
+/* Wide content scrolls inside its own container so the page body never
+   scrolls sideways on a narrow screen. */
+.table-scroll { overflow-x: auto; }
+
+table { width: 100%; border-collapse: collapse; font-size: 13px; }
+
+th, td {
+  text-align: left;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+th {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: .05em;
+  color: var(--text-dim);
+}
+
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover { background: var(--surface-alt); }
+
+.actions-col, td.actions { text-align: right; }
+td.actions { display: table-cell; }
+td.actions .btn + .btn { margin-left: 6px; }
+
+.mono { font-family: var(--mono); font-size: 12px; }
+.dim { color: var(--text-dim); }
+.empty { padding: 22px 16px; text-align: center; color: var(--text-dim); }
+
+.device-name { font-weight: 600; }
+.device-sub { font-size: 11.5px; color: var(--text-dim); margin-top: 1px; }
+
+/* -- pills ---------------------------------------------------------- */
+
+.pill {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.pill-ok   { background: var(--ok-bg);   color: var(--ok); }
+.pill-warn { background: var(--warn-bg); color: var(--warn); }
+.pill-err  { background: var(--err-bg);  color: var(--err); }
+.pill-idle { background: var(--idle-bg); color: var(--idle); }
+
+/* -- buttons -------------------------------------------------------- */
+
+.btn {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 13px;
+  border-radius: 7px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  transition: background .12s ease, opacity .12s ease;
+}
+
+.btn:hover:not(:disabled) { background: var(--surface-alt); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+
+.btn-primary:hover:not(:disabled) { filter: brightness(1.08); background: var(--accent); }
+.btn-ghost { background: transparent; border-color: transparent; color: var(--text-dim); }
+.btn-ghost:hover:not(:disabled) { background: var(--surface-alt); color: var(--text); }
+.btn-small { font-size: 12px; padding: 4px 9px; }
+
+/* -- banner --------------------------------------------------------- */
+
+.banner {
+  margin: 0;
+  padding: 11px 20px;
+  font-size: 13px;
+  border-bottom: 1px solid var(--border);
+  background: var(--err-bg);
+  color: var(--err);
+}
+
+.banner.info { background: var(--ok-bg); color: var(--ok); }
+.banner.warn { background: var(--warn-bg); color: var(--warn); }
+
+/* -- templates ------------------------------------------------------ */
+
+.templates { padding: 6px 0; }
+
+.template-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.template-row:last-child { border-bottom: none; }
+.template-name { font-family: var(--mono); font-size: 12.5px; font-weight: 600; }
+.template-rules { font-size: 12px; color: var(--text-dim); text-align: right; }
+
+/* -- logs ----------------------------------------------------------- */
+
+.logs {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 8px 0;
+  font-family: var(--mono);
+  font-size: 12px;
+}
+
+.log-line {
+  display: flex;
+  gap: 10px;
+  padding: 3px 16px;
+  align-items: baseline;
+}
+
+.log-line:hover { background: var(--surface-alt); }
+.log-time { color: var(--text-dim); flex: none; }
+.log-msg { word-break: break-word; }
+.log-warning .log-msg { color: var(--warn); }
+.log-error .log-msg, .log-critical .log-msg { color: var(--err); }
+
+/* -- settings ------------------------------------------------------- */
+
+.settings {
+  margin: 0;
+  padding: 14px 16px;
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 7px 18px;
+  font-size: 13px;
+}
+
+.settings dt { color: var(--text-dim); }
+.settings dd { margin: 0; font-family: var(--mono); font-size: 12.5px; word-break: break-all; }
+
+/* -- modal ---------------------------------------------------------- */
+
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, .55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  z-index: 50;
+}
+
+.modal-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  width: min(900px, 100%);
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .3);
+}
+
+.modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-head h3 { margin: 0; font-size: 15px; }
+.modal-path { margin: 3px 0 0; font-size: 12px; color: var(--text-dim); font-family: var(--mono); word-break: break-all; }
+
+.yaml {
+  margin: 0;
+  padding: 16px;
+  overflow: auto;
+  font-family: var(--mono);
+  font-size: 12.5px;
+  line-height: 1.55;
+  white-space: pre;
+  background: var(--surface-alt);
+}
+
+[hidden] { display: none !important; }

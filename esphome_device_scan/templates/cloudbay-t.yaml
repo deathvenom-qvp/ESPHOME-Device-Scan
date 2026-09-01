@@ -1,0 +1,71 @@
+# CloudBay T -- base firmware template
+#
+# Matching directives. With none of these present the filename stem
+# ("cloudbay-t") is used as the prefix, which is already what we want here;
+# they are spelled out to document the behaviour.
+#
+# x-match-prefix: cloudbay-t
+# x-mac-policy:   suffix3
+# x-priority:     10
+#
+# The device name below is a placeholder. ESPHome Device Scan replaces it with
+# the real discovered node name and neutralises the MAC-suffix logic when it
+# generates a per-device config from this file.
+
+substitutions:
+  devicename: cloudbay-t
+  mac: "000000"
+  friendly: "CloudBay T"
+
+esphome:
+  name: cloudbay-t-${mac}
+  friendly_name: "${friendly} ${mac}"
+  name_add_mac_suffix: true
+  on_boot:
+    priority: 600
+    then:
+      - logger.log: "CloudBay T booted"
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+  level: INFO
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Fallback hotspot, used when the configured network is unreachable.
+  ap:
+    ssid: "${devicename}-${mac}"
+    password: !secret ap_password
+
+captive_portal:
+
+sensor:
+  - platform: uptime
+    name: "Uptime"
+    update_interval: 60s
+
+  - platform: wifi_signal
+    name: "WiFi Signal"
+    update_interval: 60s
+
+binary_sensor:
+  - platform: status
+    name: "Status"
+
+button:
+  - platform: restart
+    name: "Restart"

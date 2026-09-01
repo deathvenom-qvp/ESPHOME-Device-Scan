@@ -1,0 +1,42 @@
+---
+configuration:
+  esphome_config_dir:
+    name: ESPHome config directory
+    description: >-
+      Where the ESPHome add-on keeps its YAML files. Default
+      /homeassistant/esphome, which is <your HA config>/esphome.
+  templates_dir:
+    name: Templates directory
+    description: >-
+      Where your base YAML templates live. Two examples are copied here on
+      first start. Editable via the File Editor or Samba add-ons.
+  scan_interval_minutes:
+    name: Scan interval (minutes)
+    description: How often to look for devices without a config.
+  auto_generate:
+    name: Generate automatically
+    description: >-
+      Write YAML for matched devices that have none. Turn off to review each
+      device in the panel and generate on demand. Existing files are never
+      overwritten either way.
+  scan_on_startup:
+    name: Scan on startup
+    description: Run a scan as soon as the add-on starts.
+  mac_policy:
+    name: MAC substitution policy
+    description: >-
+      What replaces ${mac} outside the node name. suffix3 uses the last three
+      bytes (aabbcc), matching ESPHome's own name_add_mac_suffix format; full
+      uses the whole MAC; strip removes the placeholder.
+  name_add_mac_suffix_action:
+    name: name_add_mac_suffix handling
+    description: >-
+      Whether to rewrite the flag to false (keeps the intent visible in the
+      file) or delete the line entirely.
+  dry_run:
+    name: Dry run
+    description: Report what would be generated without writing any files.
+  log_level:
+    name: Log level
+    description: Verbosity of the add-on log and the panel's activity log.
+network: {}

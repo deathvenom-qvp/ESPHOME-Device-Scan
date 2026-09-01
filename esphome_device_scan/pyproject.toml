@@ -1,0 +1,37 @@
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "I",    # import sorting
+    "B",    # bugbear
+    "SIM",  # simplify
+    "UP",   # pyupgrade
+    "RUF",  # ruff-specific
+    "TRY",  # exception antipatterns
+    "BLE",  # blind except
+    "S",    # bandit
+    "SLF",  # private member access
+    "EXE",  # shebang hygiene
+    "C4",   # comprehensions
+]
+ignore = [
+    "TRY003",  # long messages inline: this add-on's errors are user-facing
+    "TRY400",  # logger.error in an except block is deliberate; traces are noise
+    "S101",    # assert: used in tests
+    "E501",    # long lines are caught by the formatter, not the linter
+    # Raising a domain error inside a try whose broad handler wraps transport
+    # failures, then re-raising it past that handler, is deliberate here --
+    # see ha_client._ws_command. An inner function would only obscure it.
+    "TRY301",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["SLF", "S105", "S106"]
+"scripts/*" = ["S105", "S106", "T201"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
