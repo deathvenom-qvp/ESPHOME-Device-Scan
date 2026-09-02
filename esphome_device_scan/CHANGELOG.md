@@ -1,5 +1,25 @@
 # Changelog
 
+## 1.3.2
+
+Fixes flashing on a normal Home Assistant install.
+
+- **The ESPHome add-on runs with `host_network: true`**, so it is not on Home
+  Assistant's Docker bridge and its container hostname does not route. 1.3.1
+  probed `5c53de3b-esphome:6052` and got nothing even when the add-on was
+  running fine. Detection now reads `host_network` from the add-on's info and
+  targets the host instead — the Docker gateway (`172.30.32.1`) plus the host's
+  own interface addresses, read from `/network/info`.
+- **A run whose builder cannot be found now fails immediately**, once, instead
+  of repeating the whole search for every device. A 16-device run previously
+  spent minutes rediscovering nothing and buried the useful error in sixteen
+  copies of itself.
+- Add-ons that are in the store but **not installed** report state `unknown`;
+  these are no longer logged as "installed but unknown". A genuinely stopped
+  add-on is still reported as such.
+- Non-host-network dashboards now also fall back to the add-on's `ip_address`
+  when its hostname does not resolve.
+
 ## 1.3.1
 
 More robust detection of the ESPHome Device Builder add-on.

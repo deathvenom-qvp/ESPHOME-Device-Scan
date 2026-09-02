@@ -30,7 +30,7 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["SLF", "S105", "S106"]
+"tests/*" = ["SLF", "S104", "S105", "S106"]  # S104: fixture data, not a bind
 "scripts/*" = ["S105", "S106", "T201"]
 
 [tool.ruff.lint.isort]

@@ -72,9 +72,23 @@ KNOWN_SLUGS = (
     "local_esphome",
 )
 
+#: The Home Assistant Docker network's gateway -- i.e. the host itself, as seen
+#: from inside any add-on container (Supervisor's 172.30.32.0/23, address .1).
+#:
+#: This matters more than it looks: the ESPHome add-on runs with
+#: ``host_network: true``, so it is *not* on the bridge network and its
+#: container hostname does not route. It binds 6052 in the host's network
+#: namespace, and the gateway is how a sibling container reaches that.
+HOST_GATEWAY = "172.30.32.1"
+
 #: Bare hostnames worth trying when nothing else worked -- a local build, or a
 #: dashboard running as a plain container beside Home Assistant.
-FALLBACK_HOSTS = ("esphome", "homeassistant-esphome", "esphome-device-builder")
+FALLBACK_HOSTS = (
+    "esphome",
+    "homeassistant-esphome",
+    "esphome-device-builder",
+    "host.docker.internal",
+)
 
 #: The upload job's port value meaning "over the air". Device Builder's
 #: models.OTA_PORT; the esphome CLI resolves the address from the config.
@@ -118,6 +132,7 @@ class DashboardLocation:
             "discovery": "Supervisor discovery",
             "discovery-services": "the Supervisor discovery service map",
             "addon-info": "a known add-on slug",
+            "host-network": "the host (the add-on uses host networking)",
             "hostname-probe": "a hostname probe",
         }.get(self.source, self.source)
         slug = f" ({self.slug})" if self.slug else ""
@@ -138,6 +153,7 @@ class EsphomeDashboardClient:
         self._token = supervisor_token
         self._location: DashboardLocation | None = None
         self._attempts: list[str] = []
+        self._extra_host_addresses: list[str] = []
         #: One discovery sweep at a time; several flashes starting together
         #: should not each probe every candidate.
         self._lock = asyncio.Lock()
@@ -225,12 +241,16 @@ class EsphomeDashboardClient:
         if found is not None:
             return found
 
-        for slug in await self._candidate_slugs():
-            hostname = await self._hostname_from_supervisor(slug)
-            if hostname:
-                base = f"http://{hostname}:{DASHBOARD_PORT}"
-                if await self._reachable(base):
-                    return DashboardLocation(base, "addon-info", slug)
+        found = await self._from_addon_info()
+        if found is not None:
+            return found
+
+        # The ESPHome add-on is host-network by default, so the host itself is
+        # the single most likely place for it -- ahead of any container name.
+        for host in await self._host_addresses():
+            base = f"http://{host}:{DASHBOARD_PORT}"
+            if await self._reachable(base):
+                return DashboardLocation(base, "host-network")
 
         for host in [s.replace("_", "-") for s in KNOWN_SLUGS] + list(FALLBACK_HOSTS):
             base = f"http://{host}:{DASHBOARD_PORT}"
@@ -238,6 +258,80 @@ class EsphomeDashboardClient:
                 return DashboardLocation(base, "hostname-probe")
 
         return None
+
+    async def _from_addon_info(self) -> DashboardLocation | None:
+        """Ask Supervisor about each candidate slug and probe what it reports.
+
+        An add-on running with ``host_network: true`` -- which the ESPHome
+        add-on does -- has no useful container address, so for those we go
+        straight to the host.
+        """
+        for slug in await self._candidate_slugs():
+            data = await self._supervisor_get(f"/addons/{slug}/info")
+            if data is None:
+                continue
+
+            state = data.get("state")
+            if state in (None, "unknown"):
+                # Supervisor answers for store add-ons that are not installed;
+                # they report state "unknown". Not an error, just not it.
+                self._attempts.append(f"{slug} (not installed)")
+                continue
+            self._attempts.append(f"add-on {slug} ({state})")
+            if state != "started":
+                _LOGGER.warning(
+                    "ESPHome add-on '%s' is installed but %s -- start it to flash.",
+                    slug, state,
+                )
+                continue
+
+            if data.get("host_network") and not self._extra_host_addresses:
+                # Learn the host's real interface addresses before probing, so
+                # a setup that does not route via the Docker gateway still works.
+                await self._host_addresses()
+
+            for host in self._addresses_for(data, slug):
+                base = f"http://{host}:{DASHBOARD_PORT}"
+                if await self._reachable(base):
+                    return DashboardLocation(base, "addon-info", slug)
+        return None
+
+    def _addresses_for(self, data: dict, slug: str) -> list[str]:
+        """Addresses worth trying for an add-on, most likely first."""
+        if data.get("host_network"):
+            # Its ports live in the host's namespace, so the container name and
+            # ip_address are meaningless -- the host is what to talk to.
+            return [HOST_GATEWAY, *self._extra_host_addresses]
+
+        addresses = []
+        hostname = data.get("hostname")
+        if isinstance(hostname, str) and hostname:
+            addresses.append(hostname)
+        ip_address = data.get("ip_address")
+        if isinstance(ip_address, str) and ip_address and not ip_address.startswith("0."):
+            addresses.append(ip_address)
+        addresses.append(slug.replace("_", "-"))
+        return addresses
+
+    async def _host_addresses(self) -> list[str]:
+        """The host's own addresses, for reaching a host-network add-on.
+
+        The Docker gateway always works from inside a container; the host's
+        real interface addresses are asked for as well, since some setups route
+        differently. ``/network/info`` is permitted at ``hassio_role: default``.
+        """
+        addresses = [HOST_GATEWAY]
+        data = await self._supervisor_get("/network/info")
+        for interface in (data or {}).get("interfaces") or []:
+            if not isinstance(interface, dict) or not interface.get("enabled"):
+                continue
+            ipv4 = interface.get("ipv4") or {}
+            for cidr in ipv4.get("address") or []:
+                address = str(cidr).split("/")[0]
+                if address and address not in addresses:
+                    addresses.append(address)
+        self._extra_host_addresses = addresses[1:]
+        return addresses
 
     async def _supervisor_get(self, path: str) -> dict | None:
         """GET a Supervisor endpoint, returning its ``data`` payload."""

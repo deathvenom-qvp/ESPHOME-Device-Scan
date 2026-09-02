@@ -138,17 +138,25 @@ flight — aborting an OTA write part-way is how a board gets bricked.
 
 #### Finding the Device Builder add-on
 
-Detection tries four things, best first, so an unusual install works without
+Detection tries several things, best first, so an unusual install works without
 configuring anything:
 
-1. **Supervisor discovery** — the ESPHome add-on publishes its own host and
-   port under the `esphome` service. This is the same source Home Assistant's
-   ESPHome integration uses, so it is authoritative and works whatever
-   repository the add-on came from.
-2. **The discovery service map**, which names the add-on's slug even with no
-   active record.
-3. **Known slugs**, looked up through `/addons/<slug>/info`.
-4. **Direct hostname probes** on Home Assistant's internal network.
+1. **Supervisor discovery** — when the ESPHome add-on publishes its host and
+   port under the `esphome` service. Same source Home Assistant's own ESPHome
+   integration uses, and works whatever repository the add-on came from.
+2. **The add-on's own info**, via `/addons/<slug>/info`, for the slug named by
+   the discovery service map or one of the known ones.
+3. **The host**, at the Docker gateway `172.30.32.1` and the host's own
+   interface addresses.
+4. **Container hostname probes**, for a dashboard that is on the bridge
+   network.
+
+Step 3 is the one that usually matters. The ESPHome add-on ships with
+`host_network: true`, so it is **not** on Home Assistant's Docker bridge and
+its container name (`5c53de3b-esphome`) does not route. It binds port 6052 in
+the host's own network namespace, and the gateway is how a sibling add-on
+reaches that. Detection reads `host_network` from the add-on's info and goes
+straight to the host when it is set.
 
 **Check builder** in the Parent templates panel re-runs all of it and reports
 what it found, or every address it tried. Use it after installing or moving the

@@ -159,6 +159,20 @@ class FlashCoordinator:
 
     async def _run(self, session: FlashSession) -> None:
         try:
+            # Locate the dashboard once, before touching any device. Without
+            # this, an unreachable Device Builder makes every device fail the
+            # same slow way -- a 16-device run spent minutes rediscovering
+            # nothing, and buried the one useful error among sixteen copies.
+            try:
+                await self._dashboard.locate()
+            except DashboardError as err:
+                session.error = str(err)
+                for task in session.tasks:
+                    task.state = FlashState.FAILED
+                    task.message = str(err)
+                _LOGGER.error("Flash run aborted: %s", err)
+                return
+
             for task in session.tasks:
                 if session.cancelled:
                     task.state = FlashState.CANCELLED

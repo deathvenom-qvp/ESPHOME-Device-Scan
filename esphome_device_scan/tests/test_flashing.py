@@ -41,6 +41,11 @@ class FakeDashboard:
         self.delay = delay
         self.uploaded: list[str] = []
 
+    async def locate(self):
+        if self.fail_with:
+            raise DashboardError(self.fail_with)
+        return "http://fake:6052"
+
     async def diagnostics(self):
         return {"found": True, "base_url": "http://fake:6052",
                 "description": "http://fake:6052 via a stub", "attempts": []}
@@ -399,3 +404,18 @@ async def test_diagnostics_survives_a_dashboard_that_raises() -> None:
     report = await FlashCoordinator(Exploding()).diagnostics()
     assert report["found"] is False
     assert "boom" in report["error"]
+
+
+async def test_an_unreachable_builder_fails_the_whole_run_at_once() -> None:
+    """A 16-device run once spent minutes rediscovering nothing, once per
+    device, burying the one useful error among sixteen copies."""
+    dashboard = FakeDashboard(fail_with="Could not find the ESPHome add-on")
+    coordinator = FlashCoordinator(dashboard)
+
+    session = await coordinator.start([(f"dev{i}", f"dev{i}.yaml") for i in range(16)])
+    await asyncio.wait_for(coordinator._task, timeout=5)
+
+    assert all(t.state is FlashState.FAILED for t in session.tasks)
+    assert session.error and "Could not find" in session.error
+    # Crucially: it gave up before touching a single device.
+    assert dashboard.uploaded == []

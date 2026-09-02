@@ -291,3 +291,117 @@ async def test_diagnostics_reports_a_miss_without_raising() -> None:
     assert report["found"] is False
     assert "error" in report
     assert report["attempts"]
+
+
+# -- host-network add-ons ----------------------------------------------------
+#
+# The failure this section exists for: the ESPHome add-on ships with
+# `host_network: true`, so it is not on the Docker bridge and its container
+# hostname does not route. Detection probed `5c53de3b-esphome:6052` and got
+# nothing, on an install where the add-on was running perfectly well.
+
+
+async def test_a_host_network_addon_is_reached_via_the_host() -> None:
+    session = FakeSession({
+        "http://supervisor/discovery": (200, {"data": {}}),
+        "http://supervisor/addons/5c53de3b_esphome/info": (200, {"data": {
+            "state": "started",
+            "host_network": True,
+            "hostname": "5c53de3b-esphome",   # present, but does not route
+            "ip_address": "0.0.0.0",
+        }}),
+        "http://supervisor/network/info": (200, {"data": {"interfaces": []}}),
+        "http://172.30.32.1:6052": (200, {}),
+    })
+    location = await EsphomeDashboardClient(session, supervisor_token="tok").locate()
+
+    assert location.base_url == "http://172.30.32.1:6052"
+    assert location.slug == "5c53de3b_esphome"
+
+
+async def test_the_hosts_own_lan_address_is_tried_too() -> None:
+    """Some setups do not route to the add-on via the Docker gateway."""
+    session = FakeSession({
+        "http://supervisor/discovery": (200, {"data": {}}),
+        "http://supervisor/addons/5c53de3b_esphome/info": (200, {"data": {
+            "state": "started", "host_network": True,
+        }}),
+        "http://supervisor/network/info": (200, {"data": {"interfaces": [
+            {"enabled": True, "ipv4": {"address": ["192.168.1.50/24"]}},
+            {"enabled": False, "ipv4": {"address": ["10.0.0.9/8"]}},
+        ]}}),
+        "http://192.168.1.50:6052": (200, {}),
+    })
+    location = await EsphomeDashboardClient(session, supervisor_token="tok").locate()
+
+    assert location.base_url == "http://192.168.1.50:6052"
+
+
+async def test_the_host_is_tried_even_with_no_supervisor_answer() -> None:
+    """The gateway is worth a shot regardless -- ESPHome is host-network."""
+    session = FakeSession({"http://172.30.32.1:6052": (200, {})})
+    location = await EsphomeDashboardClient(session).locate()
+
+    assert location.base_url == "http://172.30.32.1:6052"
+    assert location.source == "host-network"
+
+
+async def test_a_bridge_network_addon_still_uses_its_hostname() -> None:
+    """Host networking is the ESPHome default, not a universal rule."""
+    session = FakeSession({
+        "http://supervisor/discovery": (200, {"data": {}}),
+        "http://supervisor/addons/5c53de3b_esphome/info": (200, {"data": {
+            "state": "started", "host_network": False,
+            "hostname": "5c53de3b-esphome", "ip_address": "172.30.33.7",
+        }}),
+        "http://5c53de3b-esphome:6052": (200, {}),
+    })
+    location = await EsphomeDashboardClient(session, supervisor_token="tok").locate()
+    assert location.base_url == "http://5c53de3b-esphome:6052"
+
+
+async def test_a_bridge_addon_falls_back_to_its_ip() -> None:
+    session = FakeSession({
+        "http://supervisor/discovery": (200, {"data": {}}),
+        "http://supervisor/addons/5c53de3b_esphome/info": (200, {"data": {
+            "state": "started", "host_network": False,
+            "hostname": "unresolvable-name", "ip_address": "172.30.33.7",
+        }}),
+        "http://172.30.33.7:6052": (200, {}),
+    })
+    location = await EsphomeDashboardClient(session, supervisor_token="tok").locate()
+    assert location.base_url == "http://172.30.33.7:6052"
+
+
+# -- add-on state ------------------------------------------------------------
+
+
+async def test_a_store_addon_that_is_not_installed_is_not_reported_as_running() -> None:
+    """Supervisor answers /info for uninstalled store add-ons with state
+    "unknown". Logging "installed but unknown" was misleading."""
+    session = FakeSession({
+        "http://supervisor/discovery": (200, {"data": {}}),
+        "http://supervisor/addons/5c53de3b_esphome-dev/info":
+            (200, {"data": {"state": "unknown"}}),
+        "http://172.30.32.1:6052": (200, {}),
+    })
+    client = EsphomeDashboardClient(session, supervisor_token="tok")
+    await client.locate()
+
+    assert any("not installed" in a for a in client.attempts)
+    assert not any("installed but" in a for a in client.attempts)
+
+
+async def test_a_stopped_addon_is_skipped_with_its_state_recorded() -> None:
+    session = FakeSession({
+        "http://supervisor/discovery": (200, {"data": {}}),
+        "http://supervisor/addons/5c53de3b_esphome/info":
+            (200, {"data": {"state": "stopped", "host_network": True}}),
+        "http://172.30.32.1:6052": (200, {}),
+    })
+    client = EsphomeDashboardClient(session, supervisor_token="tok")
+    location = await client.locate()
+
+    assert any("stopped" in a for a in client.attempts)
+    # Still found, because the host probe does not care about add-on state.
+    assert location.base_url == "http://172.30.32.1:6052"
