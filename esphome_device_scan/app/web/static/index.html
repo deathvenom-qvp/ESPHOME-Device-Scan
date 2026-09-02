@@ -56,10 +56,24 @@
       <section class="panel">
         <div class="panel-head">
           <h2>Parent templates</h2>
-          <span class="panel-note" id="templates-dir"></span>
+          <label class="filter">
+            <input type="checkbox" id="tpl-select-all">
+            Select all
+          </label>
         </div>
         <div id="templates" class="templates">
           <p class="empty">Loading…</p>
+        </div>
+        <div class="panel-foot">
+          <span class="panel-note" id="templates-dir"></span>
+          <div class="panel-foot-actions">
+            <button id="regen-selected-btn" class="btn btn-small" disabled>
+              Regenerate selected
+            </button>
+            <button id="flash-selected-btn" class="btn btn-small btn-danger" disabled>
+              Regenerate &amp; flash selected
+            </button>
+          </div>
         </div>
       </section>
 
@@ -91,6 +105,24 @@
         <button id="confirm-cancel" class="btn">Cancel</button>
         <button id="confirm-skip" class="btn" hidden>Skip hand-edited</button>
         <button id="confirm-go" class="btn btn-danger">Regenerate all</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Build-and-flash progress. Polled from /api/flash/status. -->
+  <div id="flash" class="modal" hidden>
+    <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="flash-title">
+      <div class="modal-head">
+        <div>
+          <h3 id="flash-title">Building and flashing</h3>
+          <p id="flash-sub" class="modal-path"></p>
+        </div>
+        <button id="flash-close" class="btn btn-ghost btn-small">Close</button>
+      </div>
+      <div id="flash-body" class="flash-body"></div>
+      <div class="modal-foot">
+        <span id="flash-note" class="panel-note"></span>
+        <button id="flash-cancel" class="btn btn-small">Stop after this device</button>
       </div>
     </div>
   </div>

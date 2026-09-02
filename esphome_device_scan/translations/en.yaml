@@ -6,6 +6,12 @@ configuration:
       Where the ESPHome add-on keeps its YAML files, and where parent
       templates are read from. Default /homeassistant/esphome, which is
       <your HA config>/esphome. Nothing is ever copied into it.
+  esphome_dashboard_url:
+    name: ESPHome dashboard URL
+    description: >-
+      Only needed if the ESPHome Device Builder add-on cannot be found
+      automatically. Example: http://5c53de3b-esphome:6052. Leave empty
+      to auto-discover.
   scan_interval_minutes:
     name: Scan interval (minutes)
     description: How often to look for devices without a config.

@@ -25,6 +25,7 @@ INGRESS_PEER = "172.30.32.2"
 
 DEFAULTS: dict[str, object] = {
     "esphome_config_dir": "/homeassistant/esphome",
+    "esphome_dashboard_url": "",
     "scan_interval_minutes": 15,
     "auto_generate": True,
     "scan_on_startup": True,
@@ -77,6 +78,8 @@ class Settings:
     name_add_mac_suffix_action: MacSuffixAction
     dry_run: bool
     log_level: int
+    #: Empty means auto-discover the ESPHome Device Builder add-on.
+    esphome_dashboard_url: str = ""
     supervisor_token: str | None = None
     supervisor_base_url: str = "http://supervisor/core"
     web_host: str = "0.0.0.0"  # noqa: S104 - ingress requires binding all ifaces
@@ -138,6 +141,7 @@ def load_settings(
 
     return Settings(
         esphome_config_dir=Path(str(opt("esphome_config_dir"))).expanduser(),
+        esphome_dashboard_url=str(opt("esphome_dashboard_url") or "").strip(),
         scan_interval_minutes=_as_int(opt("scan_interval_minutes"), 15, 1, 1440),
         auto_generate=_as_bool(opt("auto_generate"), True),
         scan_on_startup=_as_bool(opt("scan_on_startup"), True),

@@ -1,5 +1,27 @@
 # Changelog
 
+## 1.3.0
+
+- Each parent in the **Parent templates** panel now has a checkbox, plus a
+  **Select all**, and two actions: **Regenerate selected** and
+  **Regenerate & flash selected**.
+- Flashing hands each regenerated config to the **ESPHome Device Builder**
+  add-on over its WebSocket API (`/upload`, spawn protocol, `port: "OTA"`) to
+  compile and upload over the air. A progress dialog shows every device, its
+  state, and the live build log of the one running.
+- Devices are flashed one at a time — Device Builder compiles in one shared
+  workspace. **Stop after this device** ends the run without interrupting the
+  upload in flight.
+- The Device Builder add-on is found automatically via
+  `/addons/<slug>/info` (allowed at `hassio_role: default`, so no extra
+  privileges) with a direct hostname probe as fallback. The new
+  `esphome_dashboard_url` option overrides it.
+- New endpoints: `POST /api/regenerate-selected`, `POST /api/flash-selected`,
+  `GET /api/flash/status`, `POST /api/flash/cancel`.
+- Fix: regenerating a selection replaced the cached scan report, so devices
+  outside the selection disappeared from the device table until the next scan.
+  Results are now merged into it.
+
 ## 1.2.0
 
 - **Regenerate all** button in the panel header: rebuilds every matched

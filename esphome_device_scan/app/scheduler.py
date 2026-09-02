@@ -57,6 +57,11 @@ class ScanScheduler:
         async with self._lock:
             return await self._orchestrator.scan()
 
+    async def regenerate_templates_now(self, template_names):
+        """Rebuild the configs belonging to the selected parents."""
+        async with self._lock:
+            return await self._orchestrator.regenerate_for_templates(template_names)
+
     async def regenerate_all_now(self, *, skip_edited: bool = False):
         """Rebuild every matched device's config, holding the scan lock.
 

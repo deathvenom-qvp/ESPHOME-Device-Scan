@@ -20,6 +20,7 @@ from conftest import (
 
 from app.config_store import EsphomeConfigStore
 from app.discovery import DeviceDiscoveryService
+from app.flashing import FlashCoordinator
 from app.generator import YamlGenerator
 from app.logbuf import LogBuffer
 from app.orchestrator import ScanOrchestrator
@@ -52,7 +53,7 @@ async def client(settings, parents_installed):
     )
     orchestrator, scheduler, generator = build_stack(local, ha)
     logs = LogBuffer().install()
-    app = create_app(local, orchestrator, scheduler, generator, logs)
+    app = create_app(local, orchestrator, scheduler, generator, logs, FlashCoordinator(None))
 
     try:
         async with TestClient(TestServer(app)) as test_client:
@@ -213,7 +214,10 @@ async def test_non_ingress_requests_are_refused(settings) -> None:
     """Anything not proxied by Supervisor is bypassing HA's authentication."""
     strict = replace(settings, enforce_ingress_peer=True)
     orchestrator, scheduler, generator = build_stack(strict, FakeHaApi())
-    app = create_app(strict, orchestrator, scheduler, generator, LogBuffer())
+    app = create_app(
+        strict, orchestrator, scheduler, generator, LogBuffer(),
+        FlashCoordinator(None),
+    )
 
     async with TestClient(TestServer(app)) as test_client:
         # The test client connects from 127.0.0.1, not the ingress peer.

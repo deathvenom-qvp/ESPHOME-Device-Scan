@@ -373,6 +373,58 @@ class ScanOrchestrator:
         # is nothing there, and backs up when there is.
         return self._generate(device, match, overwrite=True)
 
+    async def devices_for_templates(self, template_names: set[str]) -> list[Device]:
+        """Discovered devices claimed by any of the named parent templates.
+
+        The selection in the panel is by template, but everything downstream
+        works on devices, so this is where the one becomes the other.
+        """
+        self.refresh_templates()
+        self._store.invalidate()
+        devices = await self._discovery.list_devices()
+
+        selected = []
+        for device in devices:
+            match = self._matcher.match(device)
+            if match is not None and match.template.name in template_names:
+                selected.append(device)
+        return selected
+
+    async def regenerate_for_templates(self, template_names: set[str]) -> ScanReport:
+        """Rebuild every config belonging to the named parent templates."""
+        started = time.monotonic()
+        started_at = datetime.now(UTC).isoformat(timespec="seconds")
+
+        try:
+            devices = await self.devices_for_templates(template_names)
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.error("Device discovery failed: %s", err)
+            return ScanReport(
+                started_at=started_at,
+                finished_at=datetime.now(UTC).isoformat(timespec="seconds"),
+                errors=(f"Device discovery failed: {err}",),
+            )
+
+        _LOGGER.info(
+            "Regenerating %d device(s) from %s",
+            len(devices), ", ".join(sorted(template_names)),
+        )
+        reports = [self._regenerate_one(device) for device in devices]
+
+        report = ScanReport(
+            devices=tuple(reports),
+            started_at=started_at,
+            finished_at=datetime.now(UTC).isoformat(timespec="seconds"),
+            duration_ms=int((time.monotonic() - started) * 1000),
+        )
+        # Merge rather than replace: this pass only covers the selected
+        # families, and overwriting the cached report would make every other
+        # device vanish from the panel's device table until the next scan.
+        for entry in reports:
+            self._merge_into_last_report(entry)
+        _LOGGER.info("Regenerate selected complete: %s", report.summary)
+        return report
+
     async def regenerate(self, node_name: str) -> DeviceReport:
         """Rebuild one device's config, backing up whatever is there now.
 

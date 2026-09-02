@@ -11,7 +11,11 @@
 (function () {
   "use strict";
 
-  var state = { devices: [], templates: [], settings: {}, onlyMissing: false };
+  var state = {
+    devices: [], templates: [], settings: {}, onlyMissing: false,
+    selected: {},          // template name -> true
+    flashPollTimer: null,
+  };
   var lastLogId = 0;
   var busy = {};
 
@@ -30,6 +34,15 @@
     confirmGo: document.getElementById("confirm-go"),
     confirmSkip: document.getElementById("confirm-skip"),
     confirmCancel: document.getElementById("confirm-cancel"),
+    selectAll: document.getElementById("tpl-select-all"),
+    regenSelBtn: document.getElementById("regen-selected-btn"),
+    flashSelBtn: document.getElementById("flash-selected-btn"),
+    flash: document.getElementById("flash"),
+    flashBody: document.getElementById("flash-body"),
+    flashSub: document.getElementById("flash-sub"),
+    flashNote: document.getElementById("flash-note"),
+    flashClose: document.getElementById("flash-close"),
+    flashCancel: document.getElementById("flash-cancel"),
     filter: document.getElementById("filter-missing"),
     modal: document.getElementById("modal"),
     modalTitle: document.getElementById("modal-title"),
@@ -187,7 +200,19 @@
 
     state.templates.forEach(function (template) {
       var row = node("div", "template-row");
-      row.appendChild(node("span", "template-name", template.name));
+
+      var label = node("label");
+      var box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = !!state.selected[template.name];
+      box.addEventListener("change", function () {
+        if (box.checked) state.selected[template.name] = true;
+        else delete state.selected[template.name];
+        syncSelection();
+      });
+      label.appendChild(box);
+      label.appendChild(node("span", "template-name", template.name));
+      row.appendChild(label);
 
       var rules = [];
       if (template.regexes.length) rules.push("regex " + template.regexes.join(", "));
@@ -263,8 +288,21 @@
       state.templates = data.templates || [];
       state.settings = data.settings || {};
       applyScan(data.scan || {});
+      // Drop selections for templates that no longer exist.
+      Object.keys(state.selected).forEach(function (name) {
+        if (!state.templates.some(function (t) { return t.name === name; })) {
+          delete state.selected[name];
+        }
+      });
       renderTemplates();
       renderSettings();
+      syncSelection();
+      // A flash started before a reload (or in another tab) keeps reporting.
+      if (data.flash && data.flash.active) {
+        el.flash.hidden = false;
+        renderFlash(data.flash);
+        startFlashPolling();
+      }
       el.templatesDir.textContent = state.settings.esphome_config_dir
         ? "read from " + state.settings.esphome_config_dir
         : "";
@@ -333,6 +371,170 @@
         openModal("Preview: " + name + ".yaml", note, data.content);
       })
       .catch(function (err) { banner("Could not preview: " + err.message); });
+  }
+
+  // -- template selection ----------------------------------------------
+
+  function selectedTemplates() {
+    return state.templates
+      .filter(function (t) { return state.selected[t.name]; })
+      .map(function (t) { return t.name; });
+  }
+
+  /* Keeps the buttons and the select-all box in step with the checkboxes.
+   * Called after every change rather than recomputed on demand, so the
+   * disabled state can never drift from the actual selection. */
+  function syncSelection() {
+    var chosen = selectedTemplates();
+    var busy = state.flashPollTimer !== null;
+    el.regenSelBtn.disabled = chosen.length === 0;
+    el.flashSelBtn.disabled = chosen.length === 0 || busy;
+    el.selectAll.checked =
+      state.templates.length > 0 && chosen.length === state.templates.length;
+    el.selectAll.indeterminate =
+      chosen.length > 0 && chosen.length < state.templates.length;
+
+    var suffix = chosen.length ? " (" + chosen.length + ")" : "";
+    el.regenSelBtn.textContent = "Regenerate selected" + suffix;
+    el.flashSelBtn.textContent = "Regenerate & flash selected" + suffix;
+  }
+
+  function regenerateSelected() {
+    var chosen = selectedTemplates();
+    if (!chosen.length) return;
+    if (!window.confirm(
+      "Regenerate every device config belonging to:\n\n  " + chosen.join("\n  ")
+      + "\n\nExisting files are backed up as .bak-<timestamp> first."
+    )) return;
+
+    el.regenSelBtn.disabled = true;
+    api("api/regenerate-selected", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ templates: chosen }),
+    })
+      .then(function (data) { applyScan(data); return refresh(); })
+      .catch(function (err) { banner("Regenerate selected failed: " + err.message); })
+      .then(function () { syncSelection(); pollLogs(); });
+  }
+
+  // -- build and flash ---------------------------------------------------
+
+  var FLASH_PILL = {
+    pending: "pill-idle", running: "pill-warn", done: "pill-ok",
+    failed: "pill-err", skipped: "pill-idle", cancelled: "pill-idle",
+  };
+
+  function flashSelected() {
+    var chosen = selectedTemplates();
+    if (!chosen.length) return;
+    if (!window.confirm(
+      "Regenerate and then build + OTA flash every device belonging to:\n\n  "
+      + chosen.join("\n  ")
+      + "\n\nThe ESPHome Device Builder add-on does the build and upload, one "
+      + "device at a time. This can take several minutes each, and each device "
+      + "reboots when its new firmware lands."
+    )) return;
+
+    el.flashSelBtn.disabled = true;
+    el.flashSelBtn.textContent = "Starting…";
+    openFlashDialog();
+
+    api("api/flash-selected", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ templates: chosen }),
+    })
+      .then(function (data) {
+        if (data.regenerated) applyScan(data.regenerated);
+        renderFlash(data.flash);
+        startFlashPolling();
+        return refresh();
+      })
+      .catch(function (err) {
+        el.flash.hidden = true;
+        banner("Could not start flashing: " + err.message);
+      })
+      .then(function () {
+        el.flashSelBtn.textContent = "Regenerate & flash selected";
+        syncSelection();
+        pollLogs();
+      });
+  }
+
+  function openFlashDialog() {
+    el.flashBody.textContent = "";
+    el.flashBody.appendChild(node("p", "empty", "Preparing…"));
+    el.flashSub.textContent = "";
+    el.flashNote.textContent = "";
+    el.flash.hidden = false;
+  }
+
+  function startFlashPolling() {
+    if (state.flashPollTimer !== null) return;
+    state.flashPollTimer = setInterval(function () {
+      api("api/flash/status")
+        .then(function (snapshot) {
+          renderFlash(snapshot);
+          if (!snapshot || !snapshot.active) {
+            stopFlashPolling();
+            refresh();
+          }
+        })
+        .catch(function () { /* transient; the next tick retries */ });
+    }, 2000);
+    syncSelection();
+  }
+
+  function stopFlashPolling() {
+    if (state.flashPollTimer !== null) {
+      clearInterval(state.flashPollTimer);
+      state.flashPollTimer = null;
+    }
+    syncSelection();
+    pollLogs();
+  }
+
+  function renderFlash(snapshot) {
+    if (!snapshot || !snapshot.tasks) return;
+
+    var counts = snapshot.counts || {};
+    var done = (counts.done || 0) + (counts.failed || 0) + (counts.cancelled || 0);
+    el.flashSub.textContent =
+      done + " of " + snapshot.tasks.length + " finished"
+      + (counts.failed ? " · " + counts.failed + " failed" : "")
+      + (snapshot.active ? "" : " · run complete");
+    el.flashCancel.hidden = !snapshot.active;
+    el.flashNote.textContent = snapshot.error
+      ? snapshot.error
+      : (snapshot.cancelled && snapshot.active ? "Stopping after this device…" : "");
+
+    el.flashBody.textContent = "";
+    snapshot.tasks.forEach(function (task) {
+      var wrap = node("div", "flash-task" + (task.state === "running" ? " is-running" : ""));
+      var head = node("div", "flash-task-head");
+      head.appendChild(node("span", "flash-name", task.node_name));
+      head.appendChild(node("span", "pill " + (FLASH_PILL[task.state] || "pill-idle"), task.state));
+      wrap.appendChild(head);
+
+      if (task.message) wrap.appendChild(node("div", "flash-detail", task.message));
+      else if (task.detail) wrap.appendChild(node("div", "flash-detail", task.detail));
+
+      // Show the build log for whatever is running now, and for anything that
+      // failed -- that is where the reason will be.
+      if ((task.state === "running" || task.state === "failed") && task.lines.length) {
+        var log = node("div", "flash-log", task.lines.slice(-40).join("\n"));
+        wrap.appendChild(log);
+        setTimeout(function () { log.scrollTop = log.scrollHeight; }, 0);
+      }
+      el.flashBody.appendChild(wrap);
+    });
+  }
+
+  function cancelFlash() {
+    api("api/flash/cancel", { method: "POST" })
+      .then(function () { el.flashNote.textContent = "Stopping after this device…"; })
+      .catch(function (err) { banner("Could not cancel: " + err.message); });
   }
 
   // -- bulk regeneration -----------------------------------------------
@@ -448,6 +650,21 @@
 
   el.scanBtn.addEventListener("click", scan);
   el.regenAllBtn.addEventListener("click", regenerateAll);
+  el.regenSelBtn.addEventListener("click", regenerateSelected);
+  el.flashSelBtn.addEventListener("click", flashSelected);
+  el.flashCancel.addEventListener("click", cancelFlash);
+  el.flashClose.addEventListener("click", function () { el.flash.hidden = true; });
+  el.flash.addEventListener("click", function (event) {
+    if (event.target === el.flash) el.flash.hidden = true;
+  });
+  el.selectAll.addEventListener("change", function () {
+    state.selected = {};
+    if (el.selectAll.checked) {
+      state.templates.forEach(function (t) { state.selected[t.name] = true; });
+    }
+    renderTemplates();
+    syncSelection();
+  });
   el.confirm.addEventListener("click", function (event) {
     if (event.target === el.confirm) el.confirmCancel.click();
   });

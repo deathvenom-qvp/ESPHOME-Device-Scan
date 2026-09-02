@@ -16,6 +16,7 @@ from conftest import FakeHaApi, make_entry, make_registry_device
 
 from app.config_store import EsphomeConfigStore
 from app.discovery import DeviceDiscoveryService
+from app.flashing import FlashCoordinator
 from app.generator import YamlGenerator
 from app.logbuf import LogBuffer
 from app.models import Outcome
@@ -242,7 +243,7 @@ async def client(settings, parented):
     )
     scheduler = ScanScheduler(orchestrator, 900, scan_on_startup=False)
     logs = LogBuffer().install()
-    app = create_app(local, orchestrator, scheduler, generator, logs)
+    app = create_app(local, orchestrator, scheduler, generator, logs, FlashCoordinator(None))
     try:
         async with TestClient(TestServer(app)) as test_client:
             yield test_client

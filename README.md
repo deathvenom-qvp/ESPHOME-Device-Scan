@@ -111,6 +111,11 @@ for after you have edited a parent. It shows what it will touch first, calls
 out any config you wrote or edited by hand, and offers to skip those. Every
 replaced file is backed up.
 
+Parents can also be ticked individually, with **Regenerate selected** and
+**Regenerate & flash selected**. The second hands each config to the **ESPHome
+Device Builder** add-on to compile and upload over the air, one device at a
+time, with a progress dialog showing the live build log.
+
 Full documentation: [`esphome_device_scan/DOCS.md`](esphome_device_scan/DOCS.md).
 
 ## Development
@@ -120,7 +125,7 @@ cd esphome_device_scan
 pip install -r requirements.txt
 pip install pytest pytest-asyncio ruff
 
-pytest -q                              # 261 tests
+pytest -q                              # 283 tests
 ruff check app/ scripts/ tests/
 
 # Offline dry run, no Home Assistant needed. Put a parent in the directory
@@ -146,6 +151,8 @@ app/
   ha_client.py      HaApi protocol + Supervisor-proxy implementation
   discovery.py      registries -> Device list
   config_store.py   ESPHome config dir: index, atomic write, backup
+  esphome_dashboard.py  ESPHome Device Builder client (build + OTA)
+  flashing.py       flash session state, progress, cancellation
   parents.py        the one rule for what counts as a parent template
   templates.py      parent discovery + the matching engine
   yaml_compat.py    ESPHome-tag-tolerant parsing, node -> source offsets

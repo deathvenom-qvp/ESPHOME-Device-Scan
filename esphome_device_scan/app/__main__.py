@@ -25,6 +25,8 @@ import aiohttp
 
 from .config_store import EsphomeConfigStore
 from .discovery import DeviceDiscoveryService
+from .esphome_dashboard import EsphomeDashboardClient
+from .flashing import FlashCoordinator
 from .generator import YamlGenerator
 from .ha_client import SupervisorHaClient
 from .logbuf import LogBuffer
@@ -119,6 +121,13 @@ async def run(args: argparse.Namespace) -> int:
                 "if this persists, run scripts/probe_ha.py to see why."
             )
 
+        dashboard = EsphomeDashboardClient(
+            session,
+            configured_url=settings.esphome_dashboard_url,
+            supervisor_token=settings.supervisor_token,
+        )
+        flasher = FlashCoordinator(dashboard)
+
         orchestrator = ScanOrchestrator(
             discovery=DeviceDiscoveryService(ha),
             store=store,
@@ -144,7 +153,9 @@ async def run(args: argparse.Namespace) -> int:
         )
         await scheduler.start()
 
-        app = create_app(settings, orchestrator, scheduler, generator, logs)
+        app = create_app(
+            settings, orchestrator, scheduler, generator, logs, flasher
+        )
         runner = await start_server(app, settings)
 
         stop = asyncio.Event()

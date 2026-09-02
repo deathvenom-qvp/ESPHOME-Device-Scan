@@ -8,17 +8,19 @@ than a generic failure.
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from aiohttp import web
 
 from ..config_store import EsphomeConfigStore
+from ..esphome_dashboard import DashboardError
 from ..logbuf import LogBuffer
 from ..models import Device, DeviceReport, Outcome, ScanReport
 from ..orchestrator import ScanOrchestrator
 from ..scheduler import ScanScheduler
 from ..settings import Settings
-from .keys import GENERATOR, LOGS, ORCHESTRATOR, SCHEDULER, SETTINGS
+from .keys import FLASHER, GENERATOR, LOGS, ORCHESTRATOR, SCHEDULER, SETTINGS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -106,7 +108,9 @@ async def get_state(request: web.Request) -> web.Response:
                 "dry_run": settings.dry_run,
                 "mac_policy": settings.mac_policy.value,
                 "name_add_mac_suffix_action": settings.name_add_mac_suffix_action.value,
+                "esphome_dashboard_url": settings.esphome_dashboard_url or "(auto-discover)",
             },
+            "flash": request.app[FLASHER].snapshot(),
         }
     )
 
@@ -151,6 +155,103 @@ async def post_regenerate_all(request: web.Request) -> web.Response:
     skip_edited = request.query.get("skip_edited", "").lower() in ("1", "true", "yes")
     report = await scheduler.regenerate_all_now(skip_edited=skip_edited)
     return web.json_response(scan_to_json(report))
+
+
+async def _selected_templates(request: web.Request) -> set[str]:
+    """Template names from the request body, validated against what exists.
+
+    Names come from the browser, so they are checked against the loaded
+    templates rather than trusted -- an unknown name is a bad request, not a
+    silent no-op that leaves the user wondering why nothing happened.
+    """
+    try:
+        body = await request.json()
+    except (ValueError, TypeError) as err:
+        raise web.HTTPBadRequest(reason="Expected a JSON body") from err
+
+    names = body.get("templates") if isinstance(body, dict) else None
+    if not isinstance(names, list) or not names:
+        raise web.HTTPBadRequest(reason="No parent templates selected")
+
+    selected = {str(name) for name in names}
+    orchestrator: ScanOrchestrator = request.app[ORCHESTRATOR]
+    orchestrator.refresh_templates()
+    known = {template.name for template in orchestrator.matcher.templates}
+
+    unknown = selected - known
+    if unknown:
+        raise web.HTTPBadRequest(
+            reason=f"Unknown parent template(s): {', '.join(sorted(unknown))}"
+        )
+    return selected
+
+
+@routes.post("/api/regenerate-selected")
+async def post_regenerate_selected(request: web.Request) -> web.Response:
+    """Rebuild the configs belonging to the selected parent templates."""
+    selected = await _selected_templates(request)
+    scheduler: ScanScheduler = request.app[SCHEDULER]
+    report = await scheduler.regenerate_templates_now(selected)
+    return web.json_response(scan_to_json(report))
+
+
+@routes.post("/api/flash-selected")
+async def post_flash_selected(request: web.Request) -> web.Response:
+    """Rebuild, then build-and-OTA-flash, every device of the selected parents.
+
+    Returns as soon as the run has started; the panel polls
+    ``/api/flash/status`` for progress, because a flash takes minutes.
+    """
+    selected = await _selected_templates(request)
+    scheduler: ScanScheduler = request.app[SCHEDULER]
+    flasher = request.app[FLASHER]
+
+    if flasher.busy:
+        return web.json_response(
+            {"error": "A flash run is already in progress."}, status=409
+        )
+
+    # Regenerate first: flashing a device from a stale config would defeat the
+    # point of pressing this button.
+    report = await scheduler.regenerate_templates_now(selected)
+
+    targets: list[tuple[str, str]] = []
+    for entry in report.devices:
+        if entry.outcome is Outcome.ERROR or entry.path is None:
+            continue
+        targets.append((entry.device.node_name, Path(entry.path).name))
+
+    if not targets:
+        return web.json_response(
+            {"error": "Nothing to flash: no device config was produced."}, status=400
+        )
+
+    try:
+        await flasher.start(targets)
+    except (DashboardError, RuntimeError) as err:
+        return web.json_response({"error": str(err)}, status=409)
+
+    return web.json_response(
+        {"started": True, "regenerated": scan_to_json(report), "flash": flasher.snapshot()}
+    )
+
+
+@routes.get("/api/flash/status")
+async def get_flash_status(request: web.Request) -> web.Response:
+    """Progress of the current (or last) flash run."""
+    snapshot = request.app[FLASHER].snapshot()
+    return web.json_response(snapshot or {"active": False, "tasks": [], "counts": {}})
+
+
+@routes.post("/api/flash/cancel")
+async def post_flash_cancel(request: web.Request) -> web.Response:
+    """Stop after the device currently being flashed finishes.
+
+    The in-flight device is deliberately allowed to complete: interrupting an
+    OTA write part-way is how a board gets bricked.
+    """
+    stopped = request.app[FLASHER].cancel()
+    return web.json_response({"cancelling": stopped})
 
 
 @routes.post("/api/generate/{node_name}")

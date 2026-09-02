@@ -12,6 +12,7 @@ from typing import TYPE_CHECKING
 from aiohttp import web
 
 if TYPE_CHECKING:
+    from ..flashing import FlashCoordinator
     from ..generator import YamlGenerator
     from ..logbuf import LogBuffer
     from ..orchestrator import ScanOrchestrator
@@ -23,3 +24,4 @@ ORCHESTRATOR: web.AppKey[ScanOrchestrator] = web.AppKey("orchestrator")
 SCHEDULER: web.AppKey[ScanScheduler] = web.AppKey("scheduler")
 GENERATOR: web.AppKey[YamlGenerator] = web.AppKey("generator")
 LOGS: web.AppKey[LogBuffer] = web.AppKey("logs")
+FLASHER: web.AppKey[FlashCoordinator] = web.AppKey("flasher")

@@ -117,6 +117,29 @@ alone.
 Every replaced file is backed up as `<name>.yaml.bak-<timestamp>` first, and
 parents are excluded as always. Devices with no matching parent are skipped.
 
+### Regenerating and flashing a selection
+
+Each parent in the **Parent templates** panel has a checkbox, with two actions
+underneath:
+
+- **Regenerate selected** — rebuilds the configs of every device claimed by the
+  ticked parents, and nothing else. Backups as usual.
+- **Regenerate & flash selected** — the same, then hands each config to the
+  **ESPHome Device Builder** add-on to compile and upload over the air. A
+  progress dialog shows every device, its state, and the live build log of the
+  one currently running.
+
+Devices are flashed **one at a time**: Device Builder compiles in a single
+shared workspace, and parallel builds would contend for it. Each build can take
+several minutes, and each device reboots when its firmware lands.
+
+**Stop after this device** halts the run without interrupting the upload in
+flight — aborting an OTA write part-way is how a board gets bricked.
+
+The Device Builder add-on is found automatically over Home Assistant's internal
+network. If yours is installed from an unusual repository and is not found, set
+`esphome_dashboard_url` (for example `http://5c53de3b-esphome:6052`).
+
 ## MAC addresses
 
 MACs come from Home Assistant's device registry, where the ESPHome integration
@@ -136,6 +159,7 @@ place (a literal `${mac}` would fail to compile), and the panel shows a warning.
 | Option | Default | Notes |
 |---|---|---|
 | `esphome_config_dir` | `/homeassistant/esphome` | Where configs live **and** where parents are read from |
+| `esphome_dashboard_url` | *(empty)* | Only if the ESPHome Device Builder add-on is not found automatically |
 | `scan_interval_minutes` | `15` | 1–1440 |
 | `auto_generate` | `true` | Off = report only |
 | `scan_on_startup` | `true` | |
@@ -181,6 +205,17 @@ API, so it is derived: config entry title first (which ESPHome sets from the
 device name), then a slugified friendly name, then `esphome-<mac>`. The
 `name_source` field on each row records which was used. If it guessed wrong,
 create the YAML by hand — the add-on will then skip that device.
+
+**"Could not find the ESPHome Device Builder add-on."**
+Flashing needs that add-on installed and running. If it is, but under a slug
+this add-on does not know, set `esphome_dashboard_url` to its internal address —
+`http://<slug with underscores as hyphens>:6052`, e.g.
+`http://5c53de3b-esphome:6052`.
+
+**A flash fails immediately.**
+Open the failing device in the progress dialog; the build log tail is shown
+there. The usual causes are a config that does not compile, or a device that is
+offline and cannot be reached over the air.
 
 **Nothing is being written.**
 Check `dry_run` and `auto_generate`, and that `esphome_config_dir` points at a

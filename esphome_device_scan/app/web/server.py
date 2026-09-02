@@ -22,9 +22,10 @@ from aiohttp import web
 
 from ..settings import INGRESS_PEER, Settings
 from . import api
-from .keys import GENERATOR, LOGS, ORCHESTRATOR, SCHEDULER, SETTINGS
+from .keys import FLASHER, GENERATOR, LOGS, ORCHESTRATOR, SCHEDULER, SETTINGS
 
 if TYPE_CHECKING:
+    from ..flashing import FlashCoordinator
     from ..generator import YamlGenerator
     from ..logbuf import LogBuffer
     from ..orchestrator import ScanOrchestrator
@@ -91,6 +92,7 @@ def create_app(
     scheduler: ScanScheduler,
     generator: YamlGenerator,
     logs: LogBuffer,
+    flasher: FlashCoordinator,
 ) -> web.Application:
     """Build the aiohttp application with its dependencies attached."""
     app = web.Application(middlewares=[ingress_only_middleware, error_middleware])
@@ -102,6 +104,7 @@ def create_app(
     app[SCHEDULER] = scheduler
     app[GENERATOR] = generator
     app[LOGS] = logs
+    app[FLASHER] = flasher
 
     app.add_routes(api.routes)
     app.router.add_get("/", index_handler)
