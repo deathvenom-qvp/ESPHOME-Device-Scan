@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.4.0
+
+**Flashing is removed.** Driving the ESPHome Device Builder add-on's build and
+OTA pipeline from here proved unreliable across real installs, and the value it
+added over opening Device Builder directly did not justify the moving parts. The
+add-on goes back to doing one job well: keeping per-device YAML in step with
+its parent.
+
+Removed: the **Regenerate & flash selected** button, the flash progress dialog,
+the **Check builder** button, the `esphome_dashboard_url` option, and the
+`/api/flash-*` and `/api/esphome-dashboard` endpoints.
+
+Kept: parent checkboxes, **Select all**, and **Regenerate selected**. Once a
+config is written, build and install it in ESPHome Device Builder as usual.
+
+The now-unused `esphome_dashboard_url` option is cleared from saved settings
+automatically on first start, so there is nothing to edit.
+
 ## 1.3.2
 
 Fixes flashing on a normal Home Assistant install.

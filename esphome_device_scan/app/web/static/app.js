@@ -14,7 +14,6 @@
   var state = {
     devices: [], templates: [], settings: {}, onlyMissing: false,
     selected: {},          // template name -> true
-    flashPollTimer: null,
   };
   var lastLogId = 0;
   var busy = {};
@@ -36,15 +35,6 @@
     confirmCancel: document.getElementById("confirm-cancel"),
     selectAll: document.getElementById("tpl-select-all"),
     regenSelBtn: document.getElementById("regen-selected-btn"),
-    flashSelBtn: document.getElementById("flash-selected-btn"),
-    flash: document.getElementById("flash"),
-    flashBody: document.getElementById("flash-body"),
-    flashSub: document.getElementById("flash-sub"),
-    flashNote: document.getElementById("flash-note"),
-    flashClose: document.getElementById("flash-close"),
-    flashCancel: document.getElementById("flash-cancel"),
-    builderCheck: document.getElementById("builder-check"),
-    builderStatus: document.getElementById("builder-status"),
     filter: document.getElementById("filter-missing"),
     modal: document.getElementById("modal"),
     modalTitle: document.getElementById("modal-title"),
@@ -299,12 +289,6 @@
       renderTemplates();
       renderSettings();
       syncSelection();
-      // A flash started before a reload (or in another tab) keeps reporting.
-      if (data.flash && data.flash.active) {
-        el.flash.hidden = false;
-        renderFlash(data.flash);
-        startFlashPolling();
-      }
       el.templatesDir.textContent = state.settings.esphome_config_dir
         ? "read from " + state.settings.esphome_config_dir
         : "";
@@ -388,9 +372,7 @@
    * disabled state can never drift from the actual selection. */
   function syncSelection() {
     var chosen = selectedTemplates();
-    var busy = state.flashPollTimer !== null;
     el.regenSelBtn.disabled = chosen.length === 0;
-    el.flashSelBtn.disabled = chosen.length === 0 || busy;
     el.selectAll.checked =
       state.templates.length > 0 && chosen.length === state.templates.length;
     el.selectAll.indeterminate =
@@ -398,7 +380,6 @@
 
     var suffix = chosen.length ? " (" + chosen.length + ")" : "";
     el.regenSelBtn.textContent = "Regenerate selected" + suffix;
-    el.flashSelBtn.textContent = "Regenerate & flash selected" + suffix;
   }
 
   function regenerateSelected() {
@@ -418,167 +399,6 @@
       .then(function (data) { applyScan(data); return refresh(); })
       .catch(function (err) { banner("Regenerate selected failed: " + err.message); })
       .then(function () { syncSelection(); pollLogs(); });
-  }
-
-  // -- build and flash ---------------------------------------------------
-
-  var FLASH_PILL = {
-    pending: "pill-idle", running: "pill-warn", done: "pill-ok",
-    failed: "pill-err", skipped: "pill-idle", cancelled: "pill-idle",
-  };
-
-  function flashSelected() {
-    var chosen = selectedTemplates();
-    if (!chosen.length) return;
-    if (!window.confirm(
-      "Regenerate and then build + OTA flash every device belonging to:\n\n  "
-      + chosen.join("\n  ")
-      + "\n\nThe ESPHome Device Builder add-on does the build and upload, one "
-      + "device at a time. This can take several minutes each, and each device "
-      + "reboots when its new firmware lands."
-    )) return;
-
-    el.flashSelBtn.disabled = true;
-    el.flashSelBtn.textContent = "Starting…";
-    openFlashDialog();
-
-    api("api/flash-selected", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ templates: chosen }),
-    })
-      .then(function (data) {
-        if (data.regenerated) applyScan(data.regenerated);
-        renderFlash(data.flash);
-        startFlashPolling();
-        return refresh();
-      })
-      .catch(function (err) {
-        banner("Could not start flashing: " + err.message);
-        // Nearly always the Device Builder add-on not being reachable, so
-        // show what detection tried rather than making the user go looking.
-        checkBuilder(true);
-      })
-      .then(function () {
-        el.flashSelBtn.textContent = "Regenerate & flash selected";
-        syncSelection();
-        pollLogs();
-      });
-  }
-
-  /* Reports where the ESPHome Device Builder add-on was found, or what was
-   * tried if it was not. Shown inside the flash dialog so a failed flash and
-   * the reason for it are in the same place. */
-  function checkBuilder(showDialog) {
-    el.builderCheck.disabled = true;
-    el.builderCheck.textContent = "Checking…";
-    if (showDialog) {
-      el.flash.hidden = false;
-      // Opened to report on the builder, not to watch a run: no run to stop.
-      if (state.flashPollTimer === null) {
-        el.flashCancel.hidden = true;
-        el.flashSub.textContent = "";
-      }
-    }
-
-    return api("api/esphome-dashboard")
-      .then(function (report) {
-        el.builderStatus.hidden = false;
-        el.builderStatus.className =
-          "builder-status " + (report.found ? "is-ok" : "is-error");
-        el.builderStatus.textContent = "";
-        el.builderStatus.appendChild(node("div", null, report.found
-          ? "ESPHome Device Builder found at " + report.description
-          : report.error));
-        if (!report.found && report.attempts && report.attempts.length) {
-          el.builderStatus.appendChild(
-            node("div", "attempts", "Tried: " + report.attempts.join(" · ")));
-        }
-        return report;
-      })
-      .catch(function (err) { banner("Builder check failed: " + err.message); })
-      .then(function (report) {
-        el.builderCheck.disabled = false;
-        el.builderCheck.textContent = "Check builder";
-        return report;
-      });
-  }
-
-  function openFlashDialog() {
-    el.flashBody.textContent = "";
-    el.builderStatus.hidden = true;
-    el.flashCancel.hidden = false;
-    el.flashBody.appendChild(node("p", "empty", "Preparing…"));
-    el.flashSub.textContent = "";
-    el.flashNote.textContent = "";
-    el.flash.hidden = false;
-  }
-
-  function startFlashPolling() {
-    if (state.flashPollTimer !== null) return;
-    state.flashPollTimer = setInterval(function () {
-      api("api/flash/status")
-        .then(function (snapshot) {
-          renderFlash(snapshot);
-          if (!snapshot || !snapshot.active) {
-            stopFlashPolling();
-            refresh();
-          }
-        })
-        .catch(function () { /* transient; the next tick retries */ });
-    }, 2000);
-    syncSelection();
-  }
-
-  function stopFlashPolling() {
-    if (state.flashPollTimer !== null) {
-      clearInterval(state.flashPollTimer);
-      state.flashPollTimer = null;
-    }
-    syncSelection();
-    pollLogs();
-  }
-
-  function renderFlash(snapshot) {
-    if (!snapshot || !snapshot.tasks) return;
-
-    var counts = snapshot.counts || {};
-    var done = (counts.done || 0) + (counts.failed || 0) + (counts.cancelled || 0);
-    el.flashSub.textContent =
-      done + " of " + snapshot.tasks.length + " finished"
-      + (counts.failed ? " · " + counts.failed + " failed" : "")
-      + (snapshot.active ? "" : " · run complete");
-    el.flashCancel.hidden = !snapshot.active;
-    el.flashNote.textContent = snapshot.error
-      ? snapshot.error
-      : (snapshot.cancelled && snapshot.active ? "Stopping after this device…" : "");
-
-    el.flashBody.textContent = "";
-    snapshot.tasks.forEach(function (task) {
-      var wrap = node("div", "flash-task" + (task.state === "running" ? " is-running" : ""));
-      var head = node("div", "flash-task-head");
-      head.appendChild(node("span", "flash-name", task.node_name));
-      head.appendChild(node("span", "pill " + (FLASH_PILL[task.state] || "pill-idle"), task.state));
-      wrap.appendChild(head);
-
-      if (task.message) wrap.appendChild(node("div", "flash-detail", task.message));
-      else if (task.detail) wrap.appendChild(node("div", "flash-detail", task.detail));
-
-      // Show the build log for whatever is running now, and for anything that
-      // failed -- that is where the reason will be.
-      if ((task.state === "running" || task.state === "failed") && task.lines.length) {
-        var log = node("div", "flash-log", task.lines.slice(-40).join("\n"));
-        wrap.appendChild(log);
-        setTimeout(function () { log.scrollTop = log.scrollHeight; }, 0);
-      }
-      el.flashBody.appendChild(wrap);
-    });
-  }
-
-  function cancelFlash() {
-    api("api/flash/cancel", { method: "POST" })
-      .then(function () { el.flashNote.textContent = "Stopping after this device…"; })
-      .catch(function (err) { banner("Could not cancel: " + err.message); });
   }
 
   // -- bulk regeneration -----------------------------------------------
@@ -695,13 +515,6 @@
   el.scanBtn.addEventListener("click", scan);
   el.regenAllBtn.addEventListener("click", regenerateAll);
   el.regenSelBtn.addEventListener("click", regenerateSelected);
-  el.flashSelBtn.addEventListener("click", flashSelected);
-  el.flashCancel.addEventListener("click", cancelFlash);
-  el.builderCheck.addEventListener("click", function () { checkBuilder(true); });
-  el.flashClose.addEventListener("click", function () { el.flash.hidden = true; });
-  el.flash.addEventListener("click", function (event) {
-    if (event.target === el.flash) el.flash.hidden = true;
-  });
   el.selectAll.addEventListener("change", function () {
     state.selected = {};
     if (el.selectAll.checked) {

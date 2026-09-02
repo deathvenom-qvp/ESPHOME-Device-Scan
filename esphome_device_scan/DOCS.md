@@ -117,54 +117,18 @@ alone.
 Every replaced file is backed up as `<name>.yaml.bak-<timestamp>` first, and
 parents are excluded as always. Devices with no matching parent are skipped.
 
-### Regenerating and flashing a selection
+### Regenerating a selection
 
-Each parent in the **Parent templates** panel has a checkbox, with two actions
-underneath:
+Each parent in the **Parent templates** panel has a checkbox, with **Select
+all** above and **Regenerate selected** beneath. That rebuilds the configs of
+every device claimed by the ticked parents, and nothing else — useful when you
+have changed one base config and do not want to touch the others.
 
-- **Regenerate selected** — rebuilds the configs of every device claimed by the
-  ticked parents, and nothing else. Backups as usual.
-- **Regenerate & flash selected** — the same, then hands each config to the
-  **ESPHome Device Builder** add-on to compile and upload over the air. A
-  progress dialog shows every device, its state, and the live build log of the
-  one currently running.
+Backups and the parent protections apply exactly as everywhere else.
 
-Devices are flashed **one at a time**: Device Builder compiles in a single
-shared workspace, and parallel builds would contend for it. Each build can take
-several minutes, and each device reboots when its firmware lands.
-
-**Stop after this device** halts the run without interrupting the upload in
-flight — aborting an OTA write part-way is how a board gets bricked.
-
-#### Finding the Device Builder add-on
-
-Detection tries several things, best first, so an unusual install works without
-configuring anything:
-
-1. **Supervisor discovery** — when the ESPHome add-on publishes its host and
-   port under the `esphome` service. Same source Home Assistant's own ESPHome
-   integration uses, and works whatever repository the add-on came from.
-2. **The add-on's own info**, via `/addons/<slug>/info`, for the slug named by
-   the discovery service map or one of the known ones.
-3. **The host**, at the Docker gateway `172.30.32.1` and the host's own
-   interface addresses.
-4. **Container hostname probes**, for a dashboard that is on the bridge
-   network.
-
-Step 3 is the one that usually matters. The ESPHome add-on ships with
-`host_network: true`, so it is **not** on Home Assistant's Docker bridge and
-its container name (`5c53de3b-esphome`) does not route. It binds port 6052 in
-the host's own network namespace, and the gateway is how a sibling add-on
-reaches that. Detection reads `host_network` from the add-on's info and goes
-straight to the host when it is set.
-
-**Check builder** in the Parent templates panel re-runs all of it and reports
-what it found, or every address it tried. Use it after installing or moving the
-ESPHome add-on.
-
-If it still cannot be found — a dashboard running outside Home Assistant, say —
-set `esphome_dashboard_url`. A bare host, `host:port`, or a full URL all work;
-the port defaults to 6052.
+Building and flashing firmware is deliberately left to the **ESPHome Device
+Builder** add-on. Once a config is written or rebuilt here, open it there and
+install as you normally would.
 
 ## MAC addresses
 
@@ -185,7 +149,6 @@ place (a literal `${mac}` would fail to compile), and the panel shows a warning.
 | Option | Default | Notes |
 |---|---|---|
 | `esphome_config_dir` | `/homeassistant/esphome` | Where configs live **and** where parents are read from |
-| `esphome_dashboard_url` | *(empty)* | Only if the ESPHome Device Builder add-on is not found automatically |
 | `scan_interval_minutes` | `15` | 1–1440 |
 | `auto_generate` | `true` | Off = report only |
 | `scan_on_startup` | `true` | |
@@ -231,17 +194,6 @@ API, so it is derived: config entry title first (which ESPHome sets from the
 device name), then a slugified friendly name, then `esphome-<mac>`. The
 `name_source` field on each row records which was used. If it guessed wrong,
 create the YAML by hand — the add-on will then skip that device.
-
-**"Could not find the ESPHome Device Builder add-on."**
-Flashing needs that add-on installed and running. If it is, but under a slug
-this add-on does not know, set `esphome_dashboard_url` to its internal address —
-`http://<slug with underscores as hyphens>:6052`, e.g.
-`http://5c53de3b-esphome:6052`.
-
-**A flash fails immediately.**
-Open the failing device in the progress dialog; the build log tail is shown
-there. The usual causes are a config that does not compile, or a device that is
-offline and cannot be reached over the air.
 
 **Nothing is being written.**
 Check `dry_run` and `auto_generate`, and that `esphome_config_dir` points at a

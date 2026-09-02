@@ -8,19 +8,17 @@ than a generic failure.
 from __future__ import annotations
 
 import logging
-from pathlib import Path
 from typing import Any
 
 from aiohttp import web
 
 from ..config_store import EsphomeConfigStore
-from ..esphome_dashboard import DashboardError
 from ..logbuf import LogBuffer
 from ..models import Device, DeviceReport, Outcome, ScanReport
 from ..orchestrator import ScanOrchestrator
 from ..scheduler import ScanScheduler
 from ..settings import Settings
-from .keys import FLASHER, GENERATOR, LOGS, ORCHESTRATOR, SCHEDULER, SETTINGS
+from .keys import GENERATOR, LOGS, ORCHESTRATOR, SCHEDULER, SETTINGS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -108,9 +106,7 @@ async def get_state(request: web.Request) -> web.Response:
                 "dry_run": settings.dry_run,
                 "mac_policy": settings.mac_policy.value,
                 "name_add_mac_suffix_action": settings.name_add_mac_suffix_action.value,
-                "esphome_dashboard_url": settings.esphome_dashboard_url or "(auto-discover)",
             },
-            "flash": request.app[FLASHER].snapshot(),
         }
     )
 
@@ -193,75 +189,6 @@ async def post_regenerate_selected(request: web.Request) -> web.Response:
     scheduler: ScanScheduler = request.app[SCHEDULER]
     report = await scheduler.regenerate_templates_now(selected)
     return web.json_response(scan_to_json(report))
-
-
-@routes.post("/api/flash-selected")
-async def post_flash_selected(request: web.Request) -> web.Response:
-    """Rebuild, then build-and-OTA-flash, every device of the selected parents.
-
-    Returns as soon as the run has started; the panel polls
-    ``/api/flash/status`` for progress, because a flash takes minutes.
-    """
-    selected = await _selected_templates(request)
-    scheduler: ScanScheduler = request.app[SCHEDULER]
-    flasher = request.app[FLASHER]
-
-    if flasher.busy:
-        return web.json_response(
-            {"error": "A flash run is already in progress."}, status=409
-        )
-
-    # Regenerate first: flashing a device from a stale config would defeat the
-    # point of pressing this button.
-    report = await scheduler.regenerate_templates_now(selected)
-
-    targets: list[tuple[str, str]] = []
-    for entry in report.devices:
-        if entry.outcome is Outcome.ERROR or entry.path is None:
-            continue
-        targets.append((entry.device.node_name, Path(entry.path).name))
-
-    if not targets:
-        return web.json_response(
-            {"error": "Nothing to flash: no device config was produced."}, status=400
-        )
-
-    try:
-        await flasher.start(targets)
-    except (DashboardError, RuntimeError) as err:
-        return web.json_response({"error": str(err)}, status=409)
-
-    return web.json_response(
-        {"started": True, "regenerated": scan_to_json(report), "flash": flasher.snapshot()}
-    )
-
-
-@routes.get("/api/esphome-dashboard")
-async def get_dashboard_diagnostics(request: web.Request) -> web.Response:
-    """Report where the ESPHome Device Builder add-on was found, or why not.
-
-    Re-runs detection each time, so it doubles as a "test connection" the user
-    can hit after installing or moving the ESPHome add-on.
-    """
-    return web.json_response(await request.app[FLASHER].diagnostics())
-
-
-@routes.get("/api/flash/status")
-async def get_flash_status(request: web.Request) -> web.Response:
-    """Progress of the current (or last) flash run."""
-    snapshot = request.app[FLASHER].snapshot()
-    return web.json_response(snapshot or {"active": False, "tasks": [], "counts": {}})
-
-
-@routes.post("/api/flash/cancel")
-async def post_flash_cancel(request: web.Request) -> web.Response:
-    """Stop after the device currently being flashed finishes.
-
-    The in-flight device is deliberately allowed to complete: interrupting an
-    OTA write part-way is how a board gets bricked.
-    """
-    stopped = request.app[FLASHER].cancel()
-    return web.json_response({"cancelling": stopped})
 
 
 @routes.post("/api/generate/{node_name}")

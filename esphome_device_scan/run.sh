@@ -11,7 +11,8 @@ set -euo pipefail
 # knows, so clear them out rather than leaving a warning on every start.
 # `bashio::addon.option <key>` with no value argument deletes the key.
 readonly REMOVED_OPTIONS=(
-    "templates_dir"   # 1.1.0: parents are read from the ESPHome directory
+    "templates_dir"          # 1.1.0: parents read from the ESPHome directory
+    "esphome_dashboard_url"  # 1.4.0: flashing removed
 )
 
 remove_stale_options() {
