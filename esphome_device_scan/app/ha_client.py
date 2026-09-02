@@ -1,13 +1,13 @@
 """Home Assistant access through the Supervisor proxy.
 
-Add-ons reach Core at ``http://supervisor/core/api/...`` (REST) and
-``ws://supervisor/core/websocket`` (WebSocket), authenticating with the
-``SUPERVISOR_TOKEN`` environment variable as a bearer token.
+Add-ons reach Core at ``ws://supervisor/core/websocket``, authenticating with
+the ``SUPERVISOR_TOKEN`` environment variable as a bearer token. Everything this
+add-on needs is a WebSocket command -- the registries have no REST equivalent,
+and neither does the in-progress-flow list.
 
-The device registry is only available over WebSocket, and it is the one surface
-that carries what this add-on needs most: the ESPHome integration registers each
-device with ``connections={(CONNECTION_NETWORK_MAC, mac)}``, so every adopted
-device arrives with its MAC already attached.
+The device registry is the surface that matters most: the ESPHome integration
+registers each device with ``connections={(CONNECTION_NETWORK_MAC, mac)}``, so
+every adopted device arrives with its MAC already attached.
 
 :class:`HaApi` is the injection seam -- the discovery service depends on the
 protocol, never on this module, so tests run with a fake and touch no network.
@@ -30,6 +30,11 @@ CMD_DEVICE_REGISTRY = "config/device_registry/list"
 CMD_ENTITY_REGISTRY = "config/entity_registry/list"
 CMD_CONFIG_ENTRIES = "config_entries/get"
 CMD_GET_STATES = "get_states"
+#: Discovered-but-unadopted flows. There is no REST equivalent: the matching
+#: `GET /api/config/config_entries/flow` explicitly raises 405, because that
+#: URL exists only to *start* a flow with POST. Home Assistant filters this
+#: command down to flows it did not start itself -- i.e. discovered ones.
+CMD_FLOW_PROGRESS = "config_entries/flow/progress"
 
 DEFAULT_TIMEOUT = aiohttp.ClientTimeout(total=30)
 
@@ -78,13 +83,6 @@ class SupervisorHaClient:
         self._lock = asyncio.Lock()
 
     @property
-    def _headers(self) -> dict[str, str]:
-        return {
-            "Authorization": f"Bearer {self._token}",
-            "Content-Type": "application/json",
-        }
-
-    @property
     def _ws_url(self) -> str:
         url = f"{self._base_url}/websocket"
         if url.startswith("https://"):
@@ -115,14 +113,8 @@ class SupervisorHaClient:
         step sets the flow's unique_id to the MAC, so even an unadopted device
         arrives identifiable.
         """
-        try:
-            flows = await self._rest_get("/api/config/config_entries/flow")
-        except HaApiError as err:
-            _LOGGER.warning("Could not list discovery flows: %s", err)
-            return []
-        if not isinstance(flows, list):
-            return []
-        return [f for f in flows if isinstance(f, dict) and f.get("handler") == "esphome"]
+        flows = await self._ws_command_safe(CMD_FLOW_PROGRESS, "discovery flows")
+        return [f for f in flows if f.get("handler") == "esphome"]
 
     async def verify(self) -> bool:
         """Cheap connectivity check used at startup for a clear early error."""
@@ -217,21 +209,3 @@ class SupervisorHaClient:
             raise HaApiError(
                 f"Authentication rejected: {response.get('message', response.get('type'))}"
             )
-
-    async def _rest_get(self, path: str) -> Any:
-        if not self._token:
-            raise HaApiError("SUPERVISOR_TOKEN is not set.")
-        url = f"{self._base_url}{path}"
-        try:
-            async with self._session.get(
-                url, headers=self._headers, timeout=DEFAULT_TIMEOUT
-            ) as response:
-                if response.status == 401:
-                    raise HaApiError(f"Unauthorized for {path}")
-                if response.status >= 400:
-                    raise HaApiError(f"HTTP {response.status} for {path}")
-                return await response.json()
-        except HaApiError:
-            raise
-        except (TimeoutError, aiohttp.ClientError, ValueError) as err:
-            raise HaApiError(f"GET {path}: {err}") from err

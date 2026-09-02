@@ -126,7 +126,7 @@ cd esphome_device_scan
 pip install -r requirements.txt
 pip install pytest pytest-asyncio ruff
 
-pytest -q                              # 290 tests
+pytest -q                              # 279 tests
 ruff check app/ scripts/ tests/
 
 # Offline dry run, no Home Assistant needed. Put a parent in the directory

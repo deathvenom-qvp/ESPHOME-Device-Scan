@@ -30,6 +30,7 @@ from app.ha_client import (
     CMD_CONFIG_ENTRIES,
     CMD_DEVICE_REGISTRY,
     CMD_ENTITY_REGISTRY,
+    CMD_FLOW_PROGRESS,
     CMD_GET_STATES,
     HaApiError,
     SupervisorHaClient,
@@ -53,6 +54,7 @@ async def probe() -> int:
             CMD_DEVICE_REGISTRY,
             CMD_ENTITY_REGISTRY,
             CMD_GET_STATES,
+            CMD_FLOW_PROGRESS,
         ):
             try:
                 result = await client._ws_command(command)  # noqa: SLF001 - a probe

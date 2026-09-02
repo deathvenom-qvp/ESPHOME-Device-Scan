@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.4.1
+
+- Fix `Could not list discovery flows: HTTP 405` on every scan. Devices Home
+  Assistant has discovered but not adopted were read with
+  `GET /api/config/config_entries/flow`, which Home Assistant answers with 405
+  — that URL exists only to *start* a flow with POST. The list comes from the
+  WebSocket command `config_entries/flow/progress` instead, which Home
+  Assistant already filters down to flows it did not start itself.
+
+  Only unadopted devices were affected; adopted ones were never read this way.
+
+- The client no longer makes REST calls at all, so its bearer-header handling
+  is gone with them.
+
 ## 1.4.0
 
 **Flashing is removed.** Driving the ESPHome Device Builder add-on's build and
