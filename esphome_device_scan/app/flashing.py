@@ -105,6 +105,25 @@ class FlashCoordinator:
     def busy(self) -> bool:
         return self._task is not None and not self._task.done()
 
+    async def diagnostics(self) -> dict[str, Any]:
+        """Where the ESPHome dashboard is, for the panel's status line.
+
+        Never raises. This backs a status panel whose entire job is to explain
+        failures, so it must not become one itself.
+        """
+        report = getattr(self._dashboard, "diagnostics", None)
+        if report is None:
+            return {
+                "found": False,
+                "error": "No ESPHome dashboard client is configured.",
+                "attempts": [],
+            }
+        try:
+            return await report()
+        except Exception as err:
+            _LOGGER.exception("Dashboard diagnostics failed")
+            return {"found": False, "error": str(err), "attempts": []}
+
     def snapshot(self) -> dict[str, Any] | None:
         """Current session state for the panel, or None if none has run."""
         return self._session.to_json() if self._session else None

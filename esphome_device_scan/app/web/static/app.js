@@ -43,6 +43,8 @@
     flashNote: document.getElementById("flash-note"),
     flashClose: document.getElementById("flash-close"),
     flashCancel: document.getElementById("flash-cancel"),
+    builderCheck: document.getElementById("builder-check"),
+    builderStatus: document.getElementById("builder-status"),
     filter: document.getElementById("filter-missing"),
     modal: document.getElementById("modal"),
     modalTitle: document.getElementById("modal-title"),
@@ -452,8 +454,10 @@
         return refresh();
       })
       .catch(function (err) {
-        el.flash.hidden = true;
         banner("Could not start flashing: " + err.message);
+        // Nearly always the Device Builder add-on not being reachable, so
+        // show what detection tried rather than making the user go looking.
+        checkBuilder(true);
       })
       .then(function () {
         el.flashSelBtn.textContent = "Regenerate & flash selected";
@@ -462,8 +466,48 @@
       });
   }
 
+  /* Reports where the ESPHome Device Builder add-on was found, or what was
+   * tried if it was not. Shown inside the flash dialog so a failed flash and
+   * the reason for it are in the same place. */
+  function checkBuilder(showDialog) {
+    el.builderCheck.disabled = true;
+    el.builderCheck.textContent = "Checking…";
+    if (showDialog) {
+      el.flash.hidden = false;
+      // Opened to report on the builder, not to watch a run: no run to stop.
+      if (state.flashPollTimer === null) {
+        el.flashCancel.hidden = true;
+        el.flashSub.textContent = "";
+      }
+    }
+
+    return api("api/esphome-dashboard")
+      .then(function (report) {
+        el.builderStatus.hidden = false;
+        el.builderStatus.className =
+          "builder-status " + (report.found ? "is-ok" : "is-error");
+        el.builderStatus.textContent = "";
+        el.builderStatus.appendChild(node("div", null, report.found
+          ? "ESPHome Device Builder found at " + report.description
+          : report.error));
+        if (!report.found && report.attempts && report.attempts.length) {
+          el.builderStatus.appendChild(
+            node("div", "attempts", "Tried: " + report.attempts.join(" · ")));
+        }
+        return report;
+      })
+      .catch(function (err) { banner("Builder check failed: " + err.message); })
+      .then(function (report) {
+        el.builderCheck.disabled = false;
+        el.builderCheck.textContent = "Check builder";
+        return report;
+      });
+  }
+
   function openFlashDialog() {
     el.flashBody.textContent = "";
+    el.builderStatus.hidden = true;
+    el.flashCancel.hidden = false;
     el.flashBody.appendChild(node("p", "empty", "Preparing…"));
     el.flashSub.textContent = "";
     el.flashNote.textContent = "";
@@ -653,6 +697,7 @@
   el.regenSelBtn.addEventListener("click", regenerateSelected);
   el.flashSelBtn.addEventListener("click", flashSelected);
   el.flashCancel.addEventListener("click", cancelFlash);
+  el.builderCheck.addEventListener("click", function () { checkBuilder(true); });
   el.flashClose.addEventListener("click", function () { el.flash.hidden = true; });
   el.flash.addEventListener("click", function (event) {
     if (event.target === el.flash) el.flash.hidden = true;

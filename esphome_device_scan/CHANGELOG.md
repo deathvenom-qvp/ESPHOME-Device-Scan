@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.3.1
+
+More robust detection of the ESPHome Device Builder add-on.
+
+- **Supervisor discovery is now tried first.** The ESPHome add-on declares
+  `discovery: [esphome]` and publishes its own host and port; this is what Home
+  Assistant's own ESPHome integration reads, it is authoritative whatever
+  repository the add-on came from, and `/discovery` needs no Supervisor role.
+- The discovery **service map** supplies the add-on's slug even when no record
+  is active, so a custom repository is handled without guessing.
+- Probing tries several endpoints rather than one, so retiring a legacy route
+  cannot break detection, and treats any non-5xx answer as found — a 401 still
+  proves the dashboard is there.
+- A **cached address that stops working is discarded**, so an add-on that
+  restarts on a new container IP is re-found instead of failing forever. A
+  failed search is never cached either: an ESPHome add-on installed later is
+  picked up without restarting this one.
+- `esphome_dashboard_url` now accepts a bare host, `host:port` or a full URL.
+- Whole-sweep time is bounded, so a slow network cannot hang the panel.
+- New **Check builder** button reports where the dashboard was found, or lists
+  every address tried. It also appears automatically when a flash fails to
+  start, which is nearly always this.
+- The status endpoint never errors, even with no dashboard client configured.
+
 ## 1.3.0
 
 - Each parent in the **Parent templates** panel now has a checkbox, plus a

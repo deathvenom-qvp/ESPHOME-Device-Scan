@@ -453,3 +453,19 @@ td.actions .btn + .btn { margin-left: 6px; }
   }
   @keyframes pulse { 0%, 100% { opacity: .25; } 50% { opacity: 1; } }
 }
+
+.builder-status {
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12.5px;
+}
+
+.builder-status.is-error { background: var(--err-bg); color: var(--err); }
+.builder-status.is-ok { background: var(--ok-bg); color: var(--ok); }
+.builder-status .attempts {
+  margin-top: 5px;
+  font-family: var(--mono);
+  font-size: 11px;
+  opacity: .85;
+  word-break: break-all;
+}

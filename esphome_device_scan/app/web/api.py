@@ -236,6 +236,16 @@ async def post_flash_selected(request: web.Request) -> web.Response:
     )
 
 
+@routes.get("/api/esphome-dashboard")
+async def get_dashboard_diagnostics(request: web.Request) -> web.Response:
+    """Report where the ESPHome Device Builder add-on was found, or why not.
+
+    Re-runs detection each time, so it doubles as a "test connection" the user
+    can hit after installing or moving the ESPHome add-on.
+    """
+    return web.json_response(await request.app[FLASHER].diagnostics())
+
+
 @routes.get("/api/flash/status")
 async def get_flash_status(request: web.Request) -> web.Response:
     """Progress of the current (or last) flash run."""

@@ -136,9 +136,27 @@ several minutes, and each device reboots when its firmware lands.
 **Stop after this device** halts the run without interrupting the upload in
 flight — aborting an OTA write part-way is how a board gets bricked.
 
-The Device Builder add-on is found automatically over Home Assistant's internal
-network. If yours is installed from an unusual repository and is not found, set
-`esphome_dashboard_url` (for example `http://5c53de3b-esphome:6052`).
+#### Finding the Device Builder add-on
+
+Detection tries four things, best first, so an unusual install works without
+configuring anything:
+
+1. **Supervisor discovery** — the ESPHome add-on publishes its own host and
+   port under the `esphome` service. This is the same source Home Assistant's
+   ESPHome integration uses, so it is authoritative and works whatever
+   repository the add-on came from.
+2. **The discovery service map**, which names the add-on's slug even with no
+   active record.
+3. **Known slugs**, looked up through `/addons/<slug>/info`.
+4. **Direct hostname probes** on Home Assistant's internal network.
+
+**Check builder** in the Parent templates panel re-runs all of it and reports
+what it found, or every address it tried. Use it after installing or moving the
+ESPHome add-on.
+
+If it still cannot be found — a dashboard running outside Home Assistant, say —
+set `esphome_dashboard_url`. A bare host, `host:port`, or a full URL all work;
+the port defaults to 6052.
 
 ## MAC addresses
 

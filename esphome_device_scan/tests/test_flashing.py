@@ -41,6 +41,10 @@ class FakeDashboard:
         self.delay = delay
         self.uploaded: list[str] = []
 
+    async def diagnostics(self):
+        return {"found": True, "base_url": "http://fake:6052",
+                "description": "http://fake:6052 via a stub", "attempts": []}
+
     async def upload(self, configuration: str):
         self.uploaded.append(configuration)
         if self.fail_with:
@@ -359,3 +363,39 @@ async def test_regenerating_a_selection_keeps_other_devices_listed(
         if r.outcome is Outcome.REGENERATED
     }
     assert regenerated == {"cloudbay-t-livingroom", "cloudbay-t-porch"}
+
+
+async def test_the_builder_diagnostics_endpoint(client_and_dashboard) -> None:
+    """Backs the panel's 'Check builder' button, so a detection failure is
+    diagnosable without reading the add-on log."""
+    client, _, _ = client_and_dashboard
+    response = await client.get("api/esphome-dashboard")
+
+    assert response.status == 200
+    data = await response.json()
+    assert data["found"] is True
+    assert data["base_url"] == "http://fake:6052"
+
+
+async def test_the_panel_offers_a_builder_check(client_and_dashboard) -> None:
+    client, _, _ = client_and_dashboard
+    body = await (await client.get("/")).text()
+    assert 'id="builder-check"' in body
+    assert 'id="builder-status"' in body
+
+
+async def test_diagnostics_never_errors_without_a_dashboard() -> None:
+    """The status panel must explain a failure, not become one."""
+    report = await FlashCoordinator(None).diagnostics()
+    assert report["found"] is False
+    assert report["error"]
+
+
+async def test_diagnostics_survives_a_dashboard_that_raises() -> None:
+    class Exploding:
+        async def diagnostics(self):
+            raise RuntimeError("boom")
+
+    report = await FlashCoordinator(Exploding()).diagnostics()
+    assert report["found"] is False
+    assert "boom" in report["error"]

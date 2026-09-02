@@ -17,13 +17,29 @@ the esphome CLI resolves the device's address itself from there.
 
 Finding the add-on
 ------------------
-Supervisor puts every add-on on one Docker network, reachable at a hostname
-derived from its slug (``5c53de3b_esphome`` -> ``5c53de3b-esphome``). Listing
-installed add-ons would need ``hassio_role: manager``, which is far more
-privilege than this warrants, so instead we ask about a handful of known slugs
-through ``/addons/<slug>/info`` -- allowed at the default role -- and fall back
-to probing the hostnames directly. Either way the answer is cached, and the
-``esphome_dashboard_url`` option overrides the whole thing.
+Four strategies, best first. Each is tried until one answers, so an unusual
+install still works without the user configuring anything:
+
+1. **Supervisor discovery.** The ESPHome add-on declares ``discovery: [esphome]``
+   and publishes a record carrying its ``host`` and ``port``. This is the same
+   source Home Assistant's own ESPHome integration uses to find the dashboard,
+   so it is authoritative, it works whatever repository the add-on came from,
+   and ``/discovery`` needs *no* Supervisor role at all.
+2. **The discovery service map.** Even with no active record, ``/discovery``
+   lists which add-on slugs provide each service, which gives us a slug to ask
+   about.
+3. **Known slugs via ``/addons/<slug>/info``**, which is permitted at
+   ``hassio_role: default`` and returns the container hostname. (Listing *all*
+   add-ons would need ``manager`` -- far more privilege than finding one
+   dashboard warrants, so we ask about specific slugs instead.)
+4. **Direct hostname probes**, since Supervisor puts every add-on on one Docker
+   network at a hostname derived from its slug (``5c53de3b_esphome`` ->
+   ``5c53de3b-esphome``).
+
+``esphome_dashboard_url`` overrides all of it, which is also how you point at an
+ESPHome dashboard running outside Home Assistant entirely. A successful answer
+is cached; a failure is not, so a dashboard that starts later is picked up
+without restarting this add-on.
 """
 
 from __future__ import annotations
@@ -37,24 +53,46 @@ import aiohttp
 
 _LOGGER = logging.getLogger(__name__)
 
-#: Port the Device Builder dashboard listens on inside its container.
+#: Port the Device Builder dashboard listens on inside its container. This is
+#: the container-internal port, so a host port mapping does not change it.
 DASHBOARD_PORT = 6052
 
-#: Slugs of the ESPHome add-on across the repositories people install it from,
-#: most likely first. The hostname is the slug with underscores as hyphens.
+#: The service name the ESPHome add-on publishes under (``discovery: [esphome]``
+#: in its manifest). Home Assistant's own ESPHome integration keys off this.
+DISCOVERY_SERVICE = "esphome"
+
+#: Fallback slugs, used only when Supervisor discovery says nothing. The
+#: hostname is the slug with underscores as hyphens.
 KNOWN_SLUGS = (
     "5c53de3b_esphome",       # official ESPHome add-on repository
     "5c53de3b_esphome-dev",   # its beta channel
+    "5c53de3b_esphome-beta",
     "a0d7b954_esphome",       # older community repository
     "core_esphome",
     "local_esphome",
 )
 
+#: Bare hostnames worth trying when nothing else worked -- a local build, or a
+#: dashboard running as a plain container beside Home Assistant.
+FALLBACK_HOSTS = ("esphome", "homeassistant-esphome", "esphome-device-builder")
+
 #: The upload job's port value meaning "over the air". Device Builder's
 #: models.OTA_PORT; the esphome CLI resolves the address from the config.
 OTA_PORT = "OTA"
 
+#: Endpoints tried when probing a candidate. ``/version`` is the cheapest and
+#: oldest; ``/devices`` is the documented legacy endpoint. Trying several means
+#: one being retired does not break detection.
+PROBE_PATHS = ("/version", "/devices", "/")
+
 CONNECT_TIMEOUT = aiohttp.ClientTimeout(total=10)
+
+#: Per-candidate probe budget. Kept short because several may be tried.
+PROBE_TIMEOUT = aiohttp.ClientTimeout(total=4)
+
+#: Ceiling on a whole discovery sweep, so a slow network cannot make the panel
+#: hang for however long every candidate takes to time out.
+DISCOVERY_BUDGET_SECONDS = 25
 
 #: A build from cold can genuinely take several minutes on slow hardware.
 FLASH_TIMEOUT_SECONDS = 30 * 60
@@ -69,9 +107,21 @@ class DashboardLocation:
     """Where the Device Builder dashboard was found, and how."""
 
     base_url: str
-    #: "option", "supervisor" or "probe" -- shown in the panel for diagnosis.
+    #: How it was found: option / discovery / discovery-services / addon-info /
+    #: hostname-probe. Surfaced in the panel so a surprise is diagnosable.
     source: str
     slug: str | None = None
+
+    def describe(self) -> str:
+        via = {
+            "option": "the esphome_dashboard_url option",
+            "discovery": "Supervisor discovery",
+            "discovery-services": "the Supervisor discovery service map",
+            "addon-info": "a known add-on slug",
+            "hostname-probe": "a hostname probe",
+        }.get(self.source, self.source)
+        slug = f" ({self.slug})" if self.slug else ""
+        return f"{self.base_url} via {via}{slug}"
 
 
 class EsphomeDashboardClient:
@@ -84,53 +134,171 @@ class EsphomeDashboardClient:
         supervisor_token: str | None = None,
     ) -> None:
         self._session = session
-        self._configured_url = (configured_url or "").strip().rstrip("/")
+        self._configured_url = self._normalise(configured_url)
         self._token = supervisor_token
         self._location: DashboardLocation | None = None
+        self._attempts: list[str] = []
+        #: One discovery sweep at a time; several flashes starting together
+        #: should not each probe every candidate.
+        self._lock = asyncio.Lock()
 
     @property
     def location(self) -> DashboardLocation | None:
         """Where we last found the dashboard, if we have looked."""
         return self._location
 
+    @property
+    def attempts(self) -> list[str]:
+        """What the last sweep tried, for the panel's diagnostics."""
+        return list(self._attempts)
+
     def forget(self) -> None:
         """Drop the cached location, so the next call rediscovers."""
         self._location = None
 
+    @staticmethod
+    def _normalise(url: str | None) -> str:
+        """Accept ``host``, ``host:port`` or a full URL from the option."""
+        raw = (url or "").strip().rstrip("/")
+        if not raw:
+            return ""
+        if "://" not in raw:
+            raw = f"http://{raw}"
+        # A bare host with no port means the dashboard's default.
+        without_scheme = raw.split("://", 1)[1]
+        if ":" not in without_scheme.split("/", 1)[0]:
+            raw = f"{raw}:{DASHBOARD_PORT}"
+        return raw
+
     # -- discovery -------------------------------------------------------
 
-    async def locate(self) -> DashboardLocation:
-        """Find the Device Builder dashboard, caching the result."""
-        if self._location is not None:
-            return self._location
+    async def locate(self, *, refresh: bool = False) -> DashboardLocation:
+        """Find the Device Builder dashboard, caching a successful answer.
 
-        if self._configured_url:
-            location = DashboardLocation(self._configured_url, "option")
-            if not await self._reachable(location.base_url):
-                raise DashboardError(
-                    f"The configured ESPHome dashboard at {location.base_url} did "
-                    f"not respond. Check 'esphome_dashboard_url' in the add-on options."
+        Failures are deliberately not cached: an ESPHome add-on that starts
+        after this one should be picked up on the next attempt rather than
+        needing a restart.
+        """
+        async with self._lock:
+            if self._location is not None and not refresh:
+                return self._location
+
+            self._attempts = []
+            try:
+                location = await asyncio.wait_for(
+                    self._discover(), timeout=DISCOVERY_BUDGET_SECONDS
                 )
+            except TimeoutError:
+                raise DashboardError(
+                    "Timed out looking for the ESPHome Device Builder add-on. "
+                    f"Tried: {', '.join(self._attempts) or 'nothing'}. Set "
+                    "'esphome_dashboard_url' to point at it directly."
+                ) from None
+
+            if location is None:
+                raise DashboardError(
+                    "Could not find the ESPHome Device Builder add-on. Make sure "
+                    "it is installed and running. Tried: "
+                    f"{', '.join(self._attempts) or 'nothing'}. If it is running "
+                    "somewhere unusual, set 'esphome_dashboard_url' (for example "
+                    "http://5c53de3b-esphome:6052)."
+                )
+
             self._location = location
+            _LOGGER.info("Using ESPHome Device Builder at %s", location.describe())
             return location
 
-        for slug in KNOWN_SLUGS:
-            hostname = await self._hostname_from_supervisor(slug)
-            candidates = [hostname] if hostname else [slug.replace("_", "-")]
-            for host in candidates:
-                base = f"http://{host}:{DASHBOARD_PORT}"
-                if await self._reachable(base):
-                    self._location = DashboardLocation(
-                        base, "supervisor" if hostname else "probe", slug
-                    )
-                    _LOGGER.info("Found ESPHome Device Builder at %s", base)
-                    return self._location
+    async def _discover(self) -> DashboardLocation | None:
+        """Work through the strategies, best first."""
+        if self._configured_url:
+            # An explicit setting is honoured even if the probe fails, so the
+            # error names the configured address rather than silently moving on.
+            if await self._reachable(self._configured_url):
+                return DashboardLocation(self._configured_url, "option")
+            raise DashboardError(
+                f"The configured ESPHome dashboard at {self._configured_url} did "
+                "not respond. Check 'esphome_dashboard_url', or clear it to let "
+                "the add-on discover the dashboard itself."
+            )
 
-        raise DashboardError(
-            "Could not find the ESPHome Device Builder add-on. Make sure it is "
-            "installed and running, or set 'esphome_dashboard_url' in this "
-            "add-on's options (for example http://5c53de3b-esphome:6052)."
-        )
+        found = await self._from_supervisor_discovery()
+        if found is not None:
+            return found
+
+        for slug in await self._candidate_slugs():
+            hostname = await self._hostname_from_supervisor(slug)
+            if hostname:
+                base = f"http://{hostname}:{DASHBOARD_PORT}"
+                if await self._reachable(base):
+                    return DashboardLocation(base, "addon-info", slug)
+
+        for host in [s.replace("_", "-") for s in KNOWN_SLUGS] + list(FALLBACK_HOSTS):
+            base = f"http://{host}:{DASHBOARD_PORT}"
+            if await self._reachable(base):
+                return DashboardLocation(base, "hostname-probe")
+
+        return None
+
+    async def _supervisor_get(self, path: str) -> dict | None:
+        """GET a Supervisor endpoint, returning its ``data`` payload."""
+        if not self._token:
+            return None
+        try:
+            async with self._session.get(
+                f"http://supervisor{path}",
+                headers={"Authorization": f"Bearer {self._token}"},
+                timeout=PROBE_TIMEOUT,
+            ) as response:
+                if response.status != 200:
+                    return None
+                payload = await response.json()
+        except (aiohttp.ClientError, TimeoutError, ValueError) as err:
+            _LOGGER.debug("Supervisor %s failed: %s", path, err)
+            return None
+        data = payload.get("data")
+        return data if isinstance(data, dict) else None
+
+    async def _from_supervisor_discovery(self) -> DashboardLocation | None:
+        """Read the ESPHome add-on's own published host and port.
+
+        This is what Home Assistant's ESPHome integration uses, and needs no
+        Supervisor role, so it is both the most authoritative answer and the
+        cheapest one to ask for.
+        """
+        self._attempts.append("Supervisor discovery")
+        data = await self._supervisor_get("/discovery")
+        if data is None:
+            return None
+
+        for message in data.get("discovery") or []:
+            if not isinstance(message, dict):
+                continue
+            if message.get("service") != DISCOVERY_SERVICE:
+                continue
+            config = message.get("config") or {}
+            host = config.get("host")
+            port = config.get("port") or DASHBOARD_PORT
+            if not host:
+                continue
+            # Supervisor renamed this field from "addon" to "app"; accept both.
+            slug = message.get("addon") or message.get("app")
+            base = f"http://{host}:{port}"
+            if await self._reachable(base):
+                return DashboardLocation(base, "discovery", slug)
+        return None
+
+    async def _candidate_slugs(self) -> list[str]:
+        """Slugs to ask about: whatever discovery names, then the known ones."""
+        slugs: list[str] = []
+        data = await self._supervisor_get("/discovery")
+        if data:
+            provided = (data.get("services") or {}).get(DISCOVERY_SERVICE) or []
+            slugs.extend(s for s in provided if isinstance(s, str))
+            if slugs:
+                self._attempts.append(f"discovery service map ({', '.join(slugs)})")
+
+        slugs.extend(slug for slug in KNOWN_SLUGS if slug not in slugs)
+        return slugs
 
     async def _hostname_from_supervisor(self, slug: str) -> str | None:
         """Ask Supervisor for an add-on's container hostname.
@@ -138,37 +306,40 @@ class EsphomeDashboardClient:
         ``/addons/<slug>/info`` is reachable at ``hassio_role: default``; the
         add-on *list* is not, which is why this asks about specific slugs.
         """
-        if not self._token:
-            return None
-        try:
-            async with self._session.get(
-                f"http://supervisor/addons/{slug}/info",
-                headers={"Authorization": f"Bearer {self._token}"},
-                timeout=CONNECT_TIMEOUT,
-            ) as response:
-                if response.status != 200:
-                    return None
-                payload = await response.json()
-        except (aiohttp.ClientError, TimeoutError, ValueError):
+        data = await self._supervisor_get(f"/addons/{slug}/info")
+        if data is None:
             return None
 
-        data = payload.get("data") or {}
-        hostname = data.get("hostname")
-        if data.get("state") and data.get("state") != "started":
-            _LOGGER.warning("ESPHome add-on '%s' is %s", slug, data.get("state"))
+        self._attempts.append(f"add-on {slug}")
+        state = data.get("state")
+        if state and state != "started":
+            _LOGGER.warning(
+                "ESPHome add-on '%s' is installed but %s; start it to flash.",
+                slug, state,
+            )
+        hostname = data.get("hostname") or slug.replace("_", "-")
         return hostname if isinstance(hostname, str) and hostname else None
 
     async def _reachable(self, base_url: str) -> bool:
-        """Cheap liveness probe that does not depend on a specific route."""
-        try:
-            async with self._session.get(
-                f"{base_url}/devices", timeout=CONNECT_TIMEOUT
-            ) as response:
-                # Any answer at all proves something is listening and speaking
-                # HTTP; 401 would still mean the dashboard is there.
-                return response.status < 500
-        except (aiohttp.ClientError, TimeoutError):
-            return False
+        """Whether something is answering HTTP at ``base_url``.
+
+        Several paths are tried so retiring one endpoint does not break
+        detection, and any non-5xx answer counts: a 401 still proves the
+        dashboard is there, just behind authentication.
+        """
+        for path in PROBE_PATHS:
+            try:
+                async with self._session.get(
+                    f"{base_url}{path}", timeout=PROBE_TIMEOUT,
+                    allow_redirects=True,
+                ) as response:
+                    if response.status < 500:
+                        _LOGGER.debug("Probe %s%s -> %s", base_url, path, response.status)
+                        return True
+            except (aiohttp.ClientError, TimeoutError):
+                continue
+        self._attempts.append(f"{base_url} (no response)")
+        return False
 
     # -- commands --------------------------------------------------------
 
@@ -229,7 +400,37 @@ class EsphomeDashboardClient:
         except DashboardError:
             raise
         except (aiohttp.ClientError, TimeoutError, ValueError) as err:
+            # The address we had stopped working -- the add-on may have
+            # restarted on a new container IP. Drop it so the next attempt
+            # rediscovers instead of failing the same way forever.
+            self.forget()
             raise DashboardError(
                 f"Lost contact with the ESPHome dashboard during {command} "
                 f"of {configuration}: {err}"
             ) from err
+
+
+    async def diagnostics(self) -> dict[str, object]:
+        """Where the dashboard is, or why it could not be found.
+
+        Never raises: this backs a status panel, and a panel that errors out
+        tells the user less than one showing what was tried.
+        """
+        try:
+            location = await self.locate(refresh=True)
+        except DashboardError as err:
+            return {
+                "found": False,
+                "error": str(err),
+                "attempts": self.attempts,
+                "configured": self._configured_url or None,
+            }
+        return {
+            "found": True,
+            "base_url": location.base_url,
+            "source": location.source,
+            "slug": location.slug,
+            "description": location.describe(),
+            "attempts": self.attempts,
+            "configured": self._configured_url or None,
+        }

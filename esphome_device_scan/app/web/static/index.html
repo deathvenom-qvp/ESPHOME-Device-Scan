@@ -67,6 +67,8 @@
         <div class="panel-foot">
           <span class="panel-note" id="templates-dir"></span>
           <div class="panel-foot-actions">
+            <button id="builder-check" class="btn btn-ghost btn-small"
+                    title="Locate the ESPHome Device Builder add-on">Check builder</button>
             <button id="regen-selected-btn" class="btn btn-small" disabled>
               Regenerate selected
             </button>
@@ -119,6 +121,7 @@
         </div>
         <button id="flash-close" class="btn btn-ghost btn-small">Close</button>
       </div>
+      <div id="builder-status" class="builder-status" hidden></div>
       <div id="flash-body" class="flash-body"></div>
       <div class="modal-foot">
         <span id="flash-note" class="panel-note"></span>
