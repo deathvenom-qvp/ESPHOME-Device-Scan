@@ -17,6 +17,7 @@
   };
   var lastLogId = 0;
   var busy = {};
+  var missingElements = [];   // ids this script wanted but the page lacks
 
   var el = {
     summary: document.getElementById("summary"),
@@ -67,6 +68,23 @@
     if (className) element.className = className;
     if (text !== undefined && text !== null) element.textContent = text;
     return element;
+  }
+
+  /* Binds a handler by element id, tolerating absence.
+   *
+   * If the page and this script ever come from different versions -- a cached
+   * app.js against fresh HTML -- an element it expects may not exist. Left
+   * unguarded that throws during wiring, before anything renders, and kills the
+   * panel outright with only a console message. Skipping the binding degrades
+   * one control instead of all of them, and says so. */
+  function bind(id, event, handler) {
+    var target = document.getElementById(id);
+    if (!target) {
+      missingElements.push(id);
+      return null;
+    }
+    target.addEventListener(event, handler);
+    return target;
   }
 
   function button(label, className, onClick) {
@@ -275,26 +293,41 @@
     renderDevices();
   }
 
+  /* Splits fetching from rendering so the two failures read differently. A
+   * render error almost always means the page and this script came from
+   * different versions -- a cached app.js against fresh HTML -- and the useful
+   * advice for that is "reload", not "could not load state". */
   function refresh() {
     return api("api/state").then(function (data) {
-      state.templates = data.templates || [];
-      state.settings = data.settings || {};
-      applyScan(data.scan || {});
-      // Drop selections for templates that no longer exist.
-      Object.keys(state.selected).forEach(function (name) {
-        if (!state.templates.some(function (t) { return t.name === name; })) {
-          delete state.selected[name];
-        }
-      });
-      renderTemplates();
-      renderSettings();
-      syncSelection();
-      el.templatesDir.textContent = state.settings.esphome_config_dir
-        ? "read from " + state.settings.esphome_config_dir
-        : "";
+      try {
+        applyState(data);
+      } catch (err) {
+        banner("The panel needs reloading (" + err.message + "). "
+          + "Press Ctrl+Shift+R, or Cmd+Shift+R on a Mac.");
+      }
     }).catch(function (err) {
       banner("Could not load state: " + err.message);
     });
+  }
+
+  function applyState(data) {
+    state.templates = data.templates || [];
+    state.settings = data.settings || {};
+    applyScan(data.scan || {});
+
+    // Drop selections for templates that no longer exist.
+    Object.keys(state.selected).forEach(function (name) {
+      if (!state.templates.some(function (t) { return t.name === name; })) {
+        delete state.selected[name];
+      }
+    });
+
+    renderTemplates();
+    renderSettings();
+    syncSelection();
+    el.templatesDir.textContent = state.settings.esphome_config_dir
+      ? "read from " + state.settings.esphome_config_dir
+      : "";
   }
 
   function scan() {
@@ -372,14 +405,17 @@
    * disabled state can never drift from the actual selection. */
   function syncSelection() {
     var chosen = selectedTemplates();
-    el.regenSelBtn.disabled = chosen.length === 0;
-    el.selectAll.checked =
-      state.templates.length > 0 && chosen.length === state.templates.length;
-    el.selectAll.indeterminate =
-      chosen.length > 0 && chosen.length < state.templates.length;
-
-    var suffix = chosen.length ? " (" + chosen.length + ")" : "";
-    el.regenSelBtn.textContent = "Regenerate selected" + suffix;
+    if (el.regenSelBtn) {
+      el.regenSelBtn.disabled = chosen.length === 0;
+      el.regenSelBtn.textContent =
+        "Regenerate selected" + (chosen.length ? " (" + chosen.length + ")" : "");
+    }
+    if (el.selectAll) {
+      el.selectAll.checked =
+        state.templates.length > 0 && chosen.length === state.templates.length;
+      el.selectAll.indeterminate =
+        chosen.length > 0 && chosen.length < state.templates.length;
+    }
   }
 
   function regenerateSelected() {
@@ -512,10 +548,19 @@
 
   // -- wiring ----------------------------------------------------------
 
-  el.scanBtn.addEventListener("click", scan);
-  el.regenAllBtn.addEventListener("click", regenerateAll);
-  el.regenSelBtn.addEventListener("click", regenerateSelected);
-  el.selectAll.addEventListener("change", function () {
+  bind("scan-btn", "click", scan);
+  bind("regen-all-btn", "click", regenerateAll);
+  bind("regen-selected-btn", "click", regenerateSelected);
+  bind("modal-close", "click", closeModal);
+  bind("clear-log", "click", function () {
+    el.logs.textContent = "";
+    el.logs.appendChild(node("p", "empty", "Cleared. New activity will appear here."));
+  });
+  bind("filter-missing", "change", function () {
+    state.onlyMissing = el.filter.checked;
+    renderDevices();
+  });
+  bind("tpl-select-all", "change", function () {
     state.selected = {};
     if (el.selectAll.checked) {
       state.templates.forEach(function (t) { state.selected[t.name] = true; });
@@ -523,24 +568,23 @@
     renderTemplates();
     syncSelection();
   });
-  el.confirm.addEventListener("click", function (event) {
-    if (event.target === el.confirm) el.confirmCancel.click();
-  });
-  el.filter.addEventListener("change", function () {
-    state.onlyMissing = el.filter.checked;
-    renderDevices();
-  });
-  document.getElementById("clear-log").addEventListener("click", function () {
-    el.logs.textContent = "";
-    el.logs.appendChild(node("p", "empty", "Cleared. New activity will appear here."));
-  });
-  document.getElementById("modal-close").addEventListener("click", closeModal);
-  el.modal.addEventListener("click", function (event) {
+  bind("modal", "click", function (event) {
     if (event.target === el.modal) closeModal();
   });
-  document.addEventListener("keydown", function (event) {
-    if (event.key === "Escape" && !el.modal.hidden) closeModal();
+  bind("confirm", "click", function (event) {
+    if (event.target === el.confirm) el.confirmCancel.click();
   });
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape" && el.modal && !el.modal.hidden) closeModal();
+  });
+
+  // A mismatch means the browser is holding an old script against a new page.
+  // Say so plainly -- the fix is a reload, which nobody guesses from a console
+  // error about null.
+  if (missingElements.length) {
+    banner("The panel needs reloading: this page is missing "
+      + missingElements.join(", ") + ". Press Ctrl+Shift+R (Cmd+Shift+R on a Mac).");
+  }
 
   refresh().then(pollLogs);
   setInterval(pollLogs, 5000);

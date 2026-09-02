@@ -222,3 +222,71 @@ async def test_non_ingress_requests_are_refused(settings) -> None:
 
 def test_the_ingress_peer_is_the_documented_one() -> None:
     assert INGRESS_PEER == "172.30.32.2"
+
+
+# -- asset freshness --------------------------------------------------------
+
+
+async def test_asset_urls_are_versioned(client) -> None:
+    """A browser holding a cached app.js against fresh HTML breaks the panel
+    outright: the old script looks up elements the new page no longer has."""
+    body = await (await client.get("/")).text()
+
+    assert "{{ASSET_VERSION}}" not in body
+    assert "static/app.js?v=" in body
+    assert "static/styles.css?v=" in body
+
+
+async def test_the_page_itself_is_not_cached(client) -> None:
+    """It carries the asset URLs, so a stale copy defeats the versioning."""
+    response = await client.get("/")
+    assert "no-cache" in response.headers.get("Cache-Control", "")
+
+
+async def test_the_asset_version_tracks_content(tmp_path) -> None:
+    from app.web import server
+
+    server.asset_version.cache_clear()
+    first = server.asset_version()
+    assert len(first) == 12
+
+    server.asset_version.cache_clear()
+    assert server.asset_version() == first, "identical assets must keep one URL"
+
+
+def test_the_script_binds_defensively() -> None:
+    """A cached script against fresh HTML must degrade, not die.
+
+    Unguarded `getElementById(...).addEventListener(...)` throws during wiring,
+    before anything renders, killing the panel with only a console message.
+    """
+    from pathlib import Path
+
+    js = (Path(__file__).resolve().parent.parent
+          / "app" / "web" / "static" / "app.js").read_text()
+
+    assert "function bind(id, event, handler)" in js
+    assert "missingElements" in js
+    # No direct addEventListener on a looked-up element outside the helper.
+    offenders = [
+        line.strip() for line in js.splitlines()
+        if "getElementById(" in line and ".addEventListener(" in line
+    ]
+    assert not offenders, f"bind() should be used instead: {offenders}"
+
+
+def test_every_element_the_script_wants_exists_in_the_page() -> None:
+    """The mismatch this guards against, caught at build time rather than in
+    someone's browser."""
+    import re
+    from pathlib import Path
+
+    static = Path(__file__).resolve().parent.parent / "app" / "web" / "static"
+    js = (static / "app.js").read_text()
+    html = (static / "index.html").read_text()
+
+    wanted = set(re.findall(r'getElementById\("([^"]+)"\)', js))
+    wanted |= set(re.findall(r'bind\("([^"]+)"', js))
+    defined = set(re.findall(r'id="([^"]+)"', html))
+
+    assert wanted <= defined, f"missing from index.html: {sorted(wanted - defined)}"

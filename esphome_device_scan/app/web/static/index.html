@@ -7,7 +7,7 @@
        URL below resolves inside the ingress prefix. -->
   <base href="{{BASE_HREF}}">
   <title>ESPHome Device Scan</title>
-  <link rel="stylesheet" href="static/styles.css">
+  <link rel="stylesheet" href="static/styles.css?v={{ASSET_VERSION}}">
 </head>
 <body>
   <header class="topbar">
@@ -119,6 +119,6 @@
     </div>
   </div>
 
-  <script src="static/app.js"></script>
+  <script src="static/app.js?v={{ASSET_VERSION}}"></script>
 </body>
 </html>

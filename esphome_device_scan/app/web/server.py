@@ -9,11 +9,18 @@ Two ingress-specific concerns are handled here:
   it as ``X-Ingress-Path``. Rather than rewriting URLs server-side, the page is
   written with relative URLs and given a ``<base href>`` built from that header,
   so the browser resolves everything correctly on its own.
+* **Asset freshness.** The page and its script must always be the same version.
+  A browser holding a cached ``app.js`` from before an update, against freshly
+  served HTML, breaks the panel outright -- the old script looks up elements the
+  new page no longer has. Asset URLs therefore carry a hash of their contents,
+  so an update changes the URL and the browser has to fetch it.
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
+from functools import lru_cache
 from html import escape
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -33,6 +40,26 @@ if TYPE_CHECKING:
 _LOGGER = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
+
+#: Assets whose content is folded into the cache-busting token.
+_VERSIONED_ASSETS = ("app.js", "styles.css")
+
+
+@lru_cache(maxsize=1)
+def asset_version() -> str:
+    """Short hash of the panel's assets, used to bust browser caches.
+
+    Content-derived rather than the add-on version, so an edit during
+    development is picked up too, and two builds with identical assets keep the
+    same URL. Computed once: the files cannot change under a running add-on.
+    """
+    digest = hashlib.sha256()
+    for name in _VERSIONED_ASSETS:
+        try:
+            digest.update((STATIC_DIR / name).read_bytes())
+        except OSError:  # pragma: no cover - a missing asset is caught on serve
+            digest.update(name.encode())
+    return digest.hexdigest()[:12]
 
 
 @web.middleware
@@ -82,7 +109,15 @@ async def index_handler(request: web.Request) -> web.Response:
     # can reach this handler, and it sets the header itself, but escaping a
     # request header before echoing it into markup costs nothing.
     html = html.replace("{{BASE_HREF}}", escape(base_href, quote=True))
-    return web.Response(text=html, content_type="text/html")
+    html = html.replace("{{ASSET_VERSION}}", asset_version())
+
+    # The HTML itself must never be cached: it carries the asset URLs, so a
+    # stale copy would keep pointing at stale assets and defeat the whole point.
+    return web.Response(
+        text=html,
+        content_type="text/html",
+        headers={"Cache-Control": "no-cache, must-revalidate"},
+    )
 
 
 def create_app(

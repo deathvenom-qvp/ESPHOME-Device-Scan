@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.4.2
+
+Fixes `Could not load state: Cannot set properties of null (setting 'disabled')`
+in the panel after updating.
+
+The cause was browser caching: nothing forced a new `app.js` to be fetched, so a
+script from before the update ran against the newly served HTML and looked up
+elements that no longer exist.
+
+- Asset URLs now carry a hash of their contents, so an update changes the URL
+  and the browser must fetch it. The HTML itself is served `no-cache`, since it
+  carries those URLs.
+- Event wiring tolerates a missing element rather than throwing during setup.
+  Unguarded, that killed the whole panel before anything rendered — worse than
+  the error above, and with nothing on screen to explain it.
+- Any mismatch now says so: "The panel needs reloading… Press Ctrl+Shift+R",
+  which is the actual fix, rather than a console message about null.
+- A test asserts every element the script looks up exists in the page, so this
+  class of mismatch is caught here rather than in a browser.
+
+If you hit this before updating, a hard refresh (Ctrl+Shift+R, or Cmd+Shift+R
+on a Mac) clears it.
+
 ## 1.4.1
 
 - Fix `Could not list discovery flows: HTTP 405` on every scan. Devices Home
