@@ -1,5 +1,7 @@
 # ESPHome Device Scan
 
+<p align="center"><img src="docs/img/vibe-coded.svg" alt="VIBE CODED TO THE MAX" width="720"></p>
+
 A Home Assistant add-on repository containing **ESPHome Device Scan** — an
 add-on that finds ESPHome devices with no YAML config, matches each to the
 **parent config already in your ESPHome directory**, and generates a per-device
@@ -165,6 +167,10 @@ app/
 Collaborators are constructor-injected throughout, so the whole pipeline runs in
 tests against a fake Home Assistant and a temp directory — no network, no clock.
 
-## Licence
+## License
 
-MIT
+[CC BY-NC-SA 4.0](LICENSE): free for anyone to use, share and modify for
+**non-commercial** purposes. Changes you share must credit this project and be
+released under the same license, so it stays open. Selling it, or using it in
+a commercial product or service, is not allowed without permission from the
+copyright holder.
